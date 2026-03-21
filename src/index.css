@@ -1,0 +1,83 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-primary: #0f172a;
+  --color-brand-secondary: #1e293b;
+  --color-brand-accent: #6366f1;
+  --color-brand-accent-hover: #818cf8;
+  --color-text-main: #f8fafc;
+  --color-text-dim: #cbd5e1;
+  --radius-custom: 1.25rem;
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style:  normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap");
+}
+
+body {
+  background-color: var(--color-brand-primary);
+  color: var(--color-text-main);
+  font-family: 'Inter', sans-serif;
+  margin: 0;
+  overflow-x: hidden;
+}
+
+.glass {
+  background: rgba(255, 255, 255, 0.02);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: var(--radius-custom);
+}
+
+.glass-card {
+  background: rgba(15, 23, 42, 0.7);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 8px 64px -12px rgba(0, 0, 0, 0.6);
+  border-radius: var(--radius-custom);
+}
+
+
+.glow {
+  box-shadow: 0 0 20px rgba(99, 102, 241, 0.2);
+}
+
+.glow-hover:hover {
+  box-shadow: 0 0 30px rgba(99, 102, 241, 0.4);
+}
+
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+@keyframes loop {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+.animate-loop {
+  animation: loop 30s linear infinite;
+}
+
+@keyframes loopReverse {
+  0% { transform : translateX(0); }
+  100% { transform : translateX(50%) ;}
+}
+
+.animate-loopReverse {
+  animation: loopReverse 20s linear infinite ;
+}
+
+.text-gradient {
+  background: linear-gradient(to right, #818cf8, #c084fc);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
