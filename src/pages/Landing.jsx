@@ -19,6 +19,12 @@ const Landing = () => {
   const { user, openAuthModal } = useAuth();
   const navigate = useNavigate();
 
+  React.useEffect(() => {
+    if (user) {
+      navigate("/diary");
+    }
+  }, [user, navigate]);
+
   const handleStart = (path) => {
     if (user) {
       navigate(path);
@@ -136,7 +142,7 @@ const Landing = () => {
                   viewport={{ once: true }}
                   transition={{ delay: i * 0.1 }}
                   onClick={() => handleStart(f.path)}
-                  className="glass-card p-10 rounded-3xl group cursor-pointer hover:bg-white/[0.04] transition-all hover:translate-y-[-8px] ring-1 ring-white/5"
+                  className="glass-card p-10 rounded-[var(--radius-custom)] group cursor-pointer hover:bg-white/[0.04] transition-all hover:translate-y-[-8px] ring-1 ring-white/5"
                 >
                    <div className={`w-14 h-14 rounded-xl bg-${f.color}/10 flex items-center justify-center text-${f.color} mb-8 group-hover:scale-110 transition-transform shadow-inner`}>
                       <Icon size={28} />

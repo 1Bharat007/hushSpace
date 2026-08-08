@@ -183,7 +183,7 @@ const AudioBox = () => {
                  key={file.id}
                  initial={{ opacity: 0, y: 10 }}
                  animate={{ opacity: 1, y: 0 }}
-                 className={`flex items-center justify-between p-4 glass-card rounded-xl transition-all border ${
+                 className={`flex items-center justify-between p-4 glass-card rounded-[var(--radius-custom)] transition-all border ${
                    currentAudio?.id === file.id ? "border-purple-500/50 bg-purple-500/5" : "border-white/5"
                  }`}
                >
@@ -210,7 +210,7 @@ const AudioBox = () => {
                </motion.div>
              ))
            ) : (
-             <div className="glass-card rounded-3xl p-20 flex flex-col items-center text-center">
+             <div className="glass-card rounded-[var(--radius-custom)] p-20 flex flex-col items-center text-center">
                 <div className="w-20 h-20 rounded-2xl bg-white/5 flex items-center justify-center text-text-dim mb-8">
                    <Mic size={40} />
                 </div>
@@ -228,7 +228,7 @@ const AudioBox = () => {
                  initial={{ opacity: 0, scale: 0.9 }}
                  animate={{ opacity: 1, scale: 1 }}
                  exit={{ opacity: 0, scale: 0.9 }}
-                 className="glass-card p-8 rounded-3xl space-y-8"
+                 className="glass-card p-8 rounded-[var(--radius-custom)] space-y-8"
                >
                  <div className="space-y-4">
                     <div className="aspect-square rounded-2xl bg-gradient-to-br from-purple-500/20 to-brand-accent/20 flex items-center justify-center relative overflow-hidden group">

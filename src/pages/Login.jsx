@@ -67,7 +67,7 @@ const Login = () => {
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ duration: 0.5 }}
-          className="w-full max-w-md glass-card p-8 md:p-10 rounded-3xl"
+          className="w-full max-w-md glass-card p-8 md:p-10 rounded-[var(--radius-custom)]"
         >
           <div className="text-center mb-8">
             <h2 className="text-3xl font-bold text-white mb-2">

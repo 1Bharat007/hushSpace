@@ -101,7 +101,7 @@ const Gallery = () => {
         
         <label className="relative cursor-pointer group">
           <input type="file" className="hidden" onChange={handleUpload} accept="image/*" />
-          <div className="flex items-center gap-2 bg-brand-accent hover:bg-brand-accent-hover text-white px-8 py-4 rounded-2xl font-bold transition-all shadow-lg shadow-brand-accent/20">
+          <div className="flex items-center gap-2 bg-brand-accent hover:bg-brand-accent-hover text-white px-8 py-4 rounded-[var(--radius-custom)] font-bold transition-all shadow-lg shadow-brand-accent/20">
             {uploading ? (
               <div className="flex items-center gap-3">
                 <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
@@ -134,7 +134,7 @@ const Gallery = () => {
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.9 }}
-                className="relative group rounded-2xl overflow-hidden break-inside-avoid shadow-xl ring-1 ring-white/10"
+                className="relative group rounded-[var(--radius-custom)] overflow-hidden break-inside-avoid shadow-xl ring-1 ring-white/10"
               >
                 <img 
                   src={image.url} 
@@ -162,8 +162,8 @@ const Gallery = () => {
           </AnimatePresence>
         </div>
       ) : (
-        <div className="glass-card rounded-3xl p-20 flex flex-col items-center text-center">
-           <div className="w-20 h-20 rounded-2xl bg-white/5 flex items-center justify-center text-text-dim mb-8">
+        <div className="glass-card rounded-[var(--radius-custom)] p-20 flex flex-col items-center text-center">
+           <div className="w-20 h-20 rounded-[var(--radius-custom)] bg-white/5 flex items-center justify-center text-text-dim mb-8">
               <ImageIcon size={40} />
            </div>
            <h3 className="text-2xl font-bold text-white mb-4">No images yet</h3>

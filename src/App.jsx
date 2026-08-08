@@ -41,7 +41,7 @@ function AppContent() {
           </ProtectedRoute>
         } />
         
-        <Route path="/diary" element={
+        <Route path="/diary/:entryId?" element={
           <ProtectedRoute>
             <Diary />
           </ProtectedRoute>

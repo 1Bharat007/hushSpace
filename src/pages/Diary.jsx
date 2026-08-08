@@ -14,16 +14,26 @@ import {
 } from "firebase/firestore";
 import { motion, AnimatePresence } from "framer-motion";
 import { Save, Plus, Clock, Search, BookOpen, Trash2 } from "lucide-react";
+import { useParams, useNavigate } from "react-router-dom";
 
 const Diary = () => {
   const { user } = useAuth();
+  const { entryId } = useParams();
+  const navigate = useNavigate();
   const [entries, setEntries] = useState([]);
-  const [activeEntryId, setActiveEntryId] = useState(null);
+  const [activeEntryId, setActiveEntryId] = useState(entryId || null);
   const [content, setContent] = useState("");
   const [title, setTitle] = useState("");
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const saveTimeoutRef = useRef(null);
+
+  // Sync activeEntryId with URL param
+  useEffect(() => {
+    if (entryId) {
+      setActiveEntryId(entryId);
+    }
+  }, [entryId]);
 
   // Fetch entries
   useEffect(() => {
@@ -40,16 +50,20 @@ const Diary = () => {
       setEntries(docs);
       setLoading(false);
       
-      // If no active entry, pick the first one
-      if (docs.length > 0 && !activeEntryId) {
-        setActiveEntryId(docs[0].id);
-        setTitle(docs[0].title || "");
-        setContent(docs[0].content || "");
+      // If an entry is selected in URL, load its content
+      const entry = entryId ? docs.find(d => d.id === entryId) : docs[0];
+      if (entry) {
+        if (!entryId) {
+          setActiveEntryId(entry.id);
+          navigate(`/diary/${entry.id}`, { replace: true });
+        }
+        setTitle(entry.title || "");
+        setContent(entry.content || "");
       }
     });
 
     return unsubscribe;
-  }, [user, activeEntryId]);
+  }, [user, entryId, navigate]);
 
   // Handle auto-save
   useEffect(() => {
@@ -101,7 +115,7 @@ const Diary = () => {
   return (
     <div className="h-[calc(100vh-120px)] md:h-[calc(100vh-80px)] flex gap-6 overflow-hidden">
       {/* Sidebar: Entries List */}
-      <div className="hidden lg:flex flex-col w-72 glass-card rounded-xl overflow-hidden ring-1 ring-white/5">
+      <div className="hidden lg:flex flex-col w-72 glass-card rounded-[var(--radius-custom)] overflow-hidden ring-1 ring-white/5">
          <div className="p-5 border-b border-white/5">
             <button 
               onClick={createNewEntry}
@@ -118,7 +132,7 @@ const Diary = () => {
               <button
                 key={entry.id}
                 onClick={() => selectEntry(entry)}
-                className={`w-full p-4 rounded-xl text-left transition-all ${
+                className={`w-full p-4 rounded-lg text-left transition-all ${
                   activeEntryId === entry.id 
                     ? "bg-brand-accent text-white shadow-xl shadow-brand-accent/20" 
                     : "hover:bg-white/5 border border-transparent text-text-dim"
@@ -139,7 +153,7 @@ const Diary = () => {
       </div>
 
       {/* Main Editor */}
-      <div className="flex-1 glass-card rounded-2xl flex flex-col relative overflow-hidden ring-1 ring-white/5 shadow-2xl">
+      <div className="flex-1 glass-card rounded-[var(--radius-custom)] flex flex-col relative overflow-hidden ring-1 ring-white/5 shadow-2xl">
         {/* Editor Toolbar */}
         <div className="p-5 border-b border-white/5 flex justify-between items-center px-8">
           <div className="flex items-center gap-3">

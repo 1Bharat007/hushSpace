@@ -9,15 +9,38 @@ import {
   LogOut, 
   User,
   Menu,
-  X
+  X,
+  Plus,
+  Clock
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { db } from "../firebase/config";
+import { collection, query, where, orderBy, limit, onSnapshot } from "firebase/firestore";
 
 const Layout = ({ children }) => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = React.useState(false);
+  const [recentEntries, setRecentEntries] = React.useState([]);
+
+  // Fetch recent entries for history
+  React.useEffect(() => {
+    if (!user) return;
+
+    const q = query(
+      collection(db, "entries"),
+      where("userId", "==", user.uid),
+      orderBy("createdAt", "desc"),
+      limit(10)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setRecentEntries(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+
+    return unsubscribe;
+  }, [user]);
 
   const handleLogout = async () => {
     try {
@@ -44,26 +67,62 @@ const Layout = ({ children }) => {
           <p className="text-xs text-text-dim mt-1">Your Personal Online Gallery</p>
         </div>
 
-        <nav className="flex-1 space-y-2">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = location.pathname === item.path;
-            
-            return (
-              <Link
-                key={item.path}
-                to={item.path}
-                className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-300 ${
-                  isActive 
-                    ? "bg-brand-accent text-white shadow-lg shadow-brand-accent/20" 
-                    : "text-text-dim hover:bg-white/5 hover:text-white"
-                }`}
+        <nav className="flex-1 overflow-y-auto mt-4 space-y-8 scrollbar-hide">
+          <div className="space-y-2">
+            <p className="text-[10px] font-bold text-text-dim uppercase tracking-widest px-4 mb-4">Main Menu</p>
+            {navItems.map((item) => {
+              const Icon = item.icon;
+              const isActive = location.pathname === item.path || (item.path === "/diary" && location.pathname.startsWith("/diary"));
+              
+              return (
+                <Link
+                  key={item.path}
+                  to={item.path}
+                  className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-300 ${
+                    isActive 
+                      ? "bg-brand-accent text-white shadow-lg shadow-brand-accent/20" 
+                      : "text-text-dim hover:bg-white/5 hover:text-white"
+                  }`}
+                >
+                  <Icon size={20} />
+                  <span className="font-medium">{item.name}</span>
+                </Link>
+              );
+            })}
+          </div>
+
+          {/* History Section */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between px-4 mb-4">
+              <p className="text-[10px] font-bold text-text-dim uppercase tracking-widest">Recent Journals</p>
+              <button 
+                onClick={() => navigate("/diary")}
+                className="text-brand-accent hover:text-brand-accent-hover"
               >
-                <Icon size={20} />
-                <span className="font-medium">{item.name}</span>
-              </Link>
-            );
-          })}
+                <Plus size={14} />
+              </button>
+            </div>
+            <div className="space-y-1">
+              {recentEntries.length > 0 ? (
+                recentEntries.map(entry => (
+                  <Link
+                    key={entry.id}
+                    to={`/diary/${entry.id}`}
+                    className={`flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all group ${
+                      location.pathname === `/diary/${entry.id}`
+                        ? "bg-white/10 text-brand-accent"
+                        : "text-text-dim hover:bg-white/5 hover:text-text-main"
+                    }`}
+                  >
+                    <BookOpen size={14} className="opacity-50 group-hover:opacity-100" />
+                    <span className="truncate">{entry.title || "Untitled"}</span>
+                  </Link>
+                ))
+              ) : (
+                <p className="px-4 text-[10px] text-text-dim italic">No entries yet...</p>
+              )}
+            </div>
+          </div>
         </nav>
 
         <div className="mt-auto pt-6 border-t border-white/5 space-y-2">

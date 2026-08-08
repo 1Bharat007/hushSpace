@@ -53,7 +53,7 @@ const Home = () => {
       className="space-y-10"
     >
       {/* Hero Welcome */}
-      <section className="relative overflow-hidden rounded-3xl p-10 md:p-16 glass-card bg-gradient-to-br from-brand-secondary to-brand-primary border-none shadow-2xl">
+      <section className="relative overflow-hidden rounded-[var(--radius-custom)] p-10 md:p-16 glass-card bg-gradient-to-br from-brand-secondary to-brand-primary border-none shadow-2xl">
         <div className="absolute top-0 right-0 w-[40%] h-[100%] bg-brand-accent/5 blur-[100px] rounded-full"></div>
         <div className="relative z-10">
           <motion.div variants={itemVariants} className="flex items-center gap-3 text-brand-accent mb-4">
@@ -82,7 +82,7 @@ const Home = () => {
       {/* Grid Features */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Resume Card */}
-        <motion.div variants={itemVariants} className="lg:col-span-2 glass-card p-8 rounded-2xl flex flex-col justify-between min-h-[300px] ring-1 ring-white/5">
+        <motion.div variants={itemVariants} className="lg:col-span-2 glass-card p-8 rounded-[var(--radius-custom)] flex flex-col justify-between min-h-[300px] ring-1 ring-white/5">
           <div>
             <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
               <BookOpen size={20} className="text-brand-accent" />
@@ -122,7 +122,7 @@ const Home = () => {
         {/* Media Summary */}
         <motion.div variants={itemVariants} className="space-y-6">
            {/* Gallery Card */}
-           <div className="glass-card p-6 rounded-2xl hover:bg-white/[0.05] transition-colors group cursor-pointer ring-1 ring-white/5">
+           <div className="glass-card p-6 rounded-[var(--radius-custom)] hover:bg-white/[0.05] transition-colors group cursor-pointer ring-1 ring-white/5">
               <div className="w-12 h-12 rounded-xl bg-brand-accent/10 flex items-center justify-center text-brand-accent mb-6 group-hover:scale-110 transition-transform shadow-inner">
                 <ImageIcon size={24} />
               </div>
