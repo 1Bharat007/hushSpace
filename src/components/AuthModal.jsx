@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
 import { motion, AnimatePresence } from "framer-motion";
 import { LogIn, UserPlus, Mail, Lock, Eye, EyeOff, X, Chrome } from "lucide-react";
@@ -12,7 +12,45 @@ const AuthModal = () => {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // Reset form inputs and errors whenever the modal opens/closes
+  useEffect(() => {
+    if (!isAuthModalOpen) {
+      setEmail("");
+      setPassword("");
+      setError("");
+      setLoading(false);
+    }
+  }, [isAuthModalOpen]);
+
   if (!isAuthModalOpen) return null;
+
+  const handleClose = () => {
+    setError("");
+    setEmail("");
+    setPassword("");
+    closeAuthModal();
+  };
+
+  const handleToggleMode = () => {
+    setError("");
+    setIsLogin((prev) => !prev);
+  };
+
+  const formatAuthError = (errMessage) => {
+    if (errMessage.includes("auth/invalid-credential") || errMessage.includes("auth/wrong-password")) {
+      return "Invalid email or password. Please try again.";
+    }
+    if (errMessage.includes("auth/user-not-found")) {
+      return "No account found with this email.";
+    }
+    if (errMessage.includes("auth/email-already-in-use")) {
+      return "An account already exists with this email address.";
+    }
+    if (errMessage.includes("auth/weak-password")) {
+      return "Password should be at least 6 characters.";
+    }
+    return errMessage.replace("Firebase: ", "").replace(/auth\//g, "");
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -25,9 +63,9 @@ const AuthModal = () => {
       } else {
         await signup(email, password);
       }
-      closeAuthModal();
+      handleClose();
     } catch (err) {
-      setError(err.message.replace("Firebase: ", ""));
+      setError(formatAuthError(err.message || "Authentication failed."));
     } finally {
       setLoading(false);
     }
@@ -38,9 +76,9 @@ const AuthModal = () => {
     setLoading(true);
     try {
       await signInWithGoogle();
-      closeAuthModal();
+      handleClose();
     } catch (err) {
-      setError(err.message.replace("Firebase: ", ""));
+      setError(formatAuthError(err.message || "Google sign-in failed."));
     } finally {
       setLoading(false);
     }
@@ -54,7 +92,7 @@ const AuthModal = () => {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          onClick={closeAuthModal}
+          onClick={handleClose}
           className="absolute inset-0 bg-black/60 backdrop-blur-sm"
         />
 
@@ -67,7 +105,7 @@ const AuthModal = () => {
         >
           {/* Close Button */}
           <button 
-            onClick={closeAuthModal}
+            onClick={handleClose}
             className="absolute top-6 right-6 p-2 text-text-dim hover:text-white transition-colors"
           >
             <X size={20} />
@@ -88,7 +126,7 @@ const AuthModal = () => {
             <button
                onClick={handleGoogleSignIn}
                disabled={loading}
-               className="w-full bg-white text-brand-primary font-bold py-3.5 rounded-xl flex items-center justify-center gap-3 hover:bg-slate-100 transition-all active:scale-[0.98] shadow-lg shadow-black/10"
+               className="w-full bg-white text-brand-primary font-bold py-3.5 rounded-xl flex items-center justify-center gap-3 hover:bg-slate-100 transition-all active:scale-[0.98] shadow-lg shadow-black/10 disabled:opacity-50"
             >
                <Chrome size={20} />
                <span>Continue with Google</span>
@@ -166,9 +204,9 @@ const AuthModal = () => {
 
           <div className="mt-8 text-center border-t border-white/5 pt-6">
             <p className="text-text-dim text-sm font-medium">
-              {isLogin ? "New to Private Place?" : "Already have an account?"}{" "}
+              {isLogin ? "New to hushSpace?" : "Already have an account?"}{" "}
               <button
-                onClick={() => setIsLogin(!isLogin)}
+                onClick={handleToggleMode}
                 className="text-brand-accent hover:text-brand-accent-hover font-bold transition-colors"
               >
                 {isLogin ? "Join Now" : "Login"}

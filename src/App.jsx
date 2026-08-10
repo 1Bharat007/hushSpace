@@ -20,8 +20,8 @@ const ProtectedRoute = ({ children }) => {
     </div>
   );
   
-  // Instead of navigating to /login, we show the Landing page or redirect to /
-  if (!user) return <Navigate to="/" />;
+  // Redirect logged-out user to landing page without history stack push
+  if (!user) return <Navigate to="/" replace />;
   
   return <Layout>{children}</Layout>;
 };

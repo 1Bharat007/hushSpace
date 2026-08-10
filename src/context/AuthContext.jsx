@@ -19,8 +19,8 @@ export const AuthProvider = ({ children }) => {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setUser(user);
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
       setLoading(false);
     });
 
@@ -40,8 +40,17 @@ export const AuthProvider = ({ children }) => {
     return signInWithPopup(auth, provider);
   };
 
-  const logout = () => {
-    return signOut(auth);
+  const logout = async () => {
+    try {
+      await signOut(auth);
+      // Clear all local storage and session storage drafts/caches on sign out
+      localStorage.clear();
+      sessionStorage.clear();
+      setIsAuthModalOpen(false);
+    } catch (err) {
+      console.error("Sign-out error:", err);
+      throw err;
+    }
   };
 
   const openAuthModal = () => setIsAuthModalOpen(true);
@@ -61,7 +70,7 @@ export const AuthProvider = ({ children }) => {
 
   return (
     <AuthContext.Provider value={value}>
-      {!loading && children}
+      {children}
     </AuthContext.Provider>
   );
 };

@@ -1,0 +1,25 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    // Helper function to verify user authentication & ownership
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    // Gallery images scoped strictly to user ID folder (/gallery/{userId}/{fileName})
+    match /gallery/{userId}/{fileName} {
+      allow read, write: if isOwner(userId);
+    }
+
+    // Audio voice notes scoped strictly to user ID folder (/audio/{userId}/{fileName})
+    match /audio/{userId}/{fileName} {
+      allow read, write: if isOwner(userId);
+    }
+
+    // Fallback: deny read/write to all unmapped storage paths
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

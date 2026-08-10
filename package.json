@@ -1,7 +1,8 @@
 {
-  "name": "04noteapp",
+  "name": "hushspace",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
+  "description": "A private personal sanctuary for diary entries, photo galleries, and voice notes behind Firebase authentication.",
   "type": "module",
   "scripts": {
     "dev": "vite",

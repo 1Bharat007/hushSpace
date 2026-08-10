@@ -1,0 +1,50 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+
+    function isNewDocOwner() {
+      return isAuthenticated() && request.resource.data.userId == request.auth.uid;
+    }
+
+    // Diary entries (entries) - Strictly scoped to request.auth.uid
+    match /entries/{entryId} {
+      allow read, update, delete: if isDocOwner();
+      allow create: if isNewDocOwner();
+    }
+
+    // Gallery items metadata (gallery) - Strictly scoped to request.auth.uid
+    match /gallery/{imageId} {
+      allow read, update, delete: if isDocOwner();
+      allow create: if isNewDocOwner();
+    }
+
+    // Audio notes metadata (audio) - Strictly scoped to request.auth.uid
+    match /audio/{audioId} {
+      allow read, update, delete: if isDocOwner();
+      allow create: if isNewDocOwner();
+    }
+
+    // User profile documents (users) - Strictly scoped to user's UID
+    match /users/{userId} {
+      allow read, write: if isOwner(userId);
+    }
+
+    // Deny read/write access to all other collections by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
