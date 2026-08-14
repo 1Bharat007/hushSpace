@@ -1,8 +1,8 @@
 {
   "name": "hushspace",
   "private": true,
-  "version": "1.0.0",
-  "description": "A private personal sanctuary for diary entries, photo galleries, and voice notes behind Firebase authentication.",
+  "version": "2.0.0",
+  "description": "Open-source, zero-knowledge encrypted personal sanctuary & mental resilience journaling platform.",
   "type": "module",
   "scripts": {
     "dev": "vite",

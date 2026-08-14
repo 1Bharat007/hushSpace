@@ -1,47 +1,94 @@
-import React, { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import React, { useEffect, useState, useMemo } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { useCrypto } from "../context/CryptoContext";
 import { motion } from "framer-motion";
-import { BookOpen, Image as ImageIcon, Music, ArrowRight, Sparkles } from "lucide-react";
+import { 
+  BookOpen, 
+  Image as ImageIcon, 
+  Music, 
+  ArrowRight, 
+  Sparkles, 
+  TrendingUp, 
+  Flame, 
+  ShieldCheck, 
+  Sliders, 
+  Lock 
+} from "lucide-react";
 import { db } from "../firebase/config";
 import { collection, query, orderBy, limit, onSnapshot, where } from "firebase/firestore";
 
+const QUICK_MOODS = [
+  { id: 'anxious', emoji: '😫', label: 'Overwhelmed' },
+  { id: 'down', emoji: '😕', label: 'Low' },
+  { id: 'neutral', emoji: '😐', label: 'Calm' },
+  { id: 'good', emoji: '🙂', label: 'Clear' },
+  { id: 'peaceful', emoji: '😊', label: 'Serene' },
+];
+
 const Home = () => {
   const { user } = useAuth();
+  const { decryptText, isLocked } = useCrypto();
+  const navigate = useNavigate();
+
   const [lastEntry, setLastEntry] = useState(null);
+  const [totalEntries, setTotalEntries] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!user) return;
 
-    // Fetch the most recent diary entry
+    // Fetch entries
     const q = query(
       collection(db, "entries"),
       where("userId", "==", user.uid),
       orderBy("createdAt", "desc"),
-      limit(1)
+      limit(10)
     );
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+    const unsubscribe = onSnapshot(q, async (snapshot) => {
+      setTotalEntries(snapshot.size);
       if (!snapshot.empty) {
-        setLastEntry({ id: snapshot.docs[0].id, ...snapshot.docs[0].data() });
+        const raw = snapshot.docs[0].data();
+        let decryptedTitle = raw.title || "Untitled Reflection";
+        let decryptedContent = raw.content || "";
+
+        if (raw.isEncrypted && !isLocked) {
+          try {
+            if (raw.ciphertext && raw.iv) {
+              decryptedContent = await decryptText(raw.ciphertext, raw.iv);
+            }
+            if (raw.titleCiphertext && raw.titleIv) {
+              decryptedTitle = await decryptText(raw.titleCiphertext, raw.titleIv);
+            }
+          } catch (err) {
+            decryptedContent = "[Encrypted entry]";
+          }
+        }
+
+        setLastEntry({
+          id: snapshot.docs[0].id,
+          ...raw,
+          title: decryptedTitle,
+          content: decryptedContent,
+        });
       }
       setLoading(false);
     });
 
     return unsubscribe;
-  }, [user]);
+  }, [user, isLocked, decryptText]);
 
   const containerVariants = {
     hidden: { opacity: 0 },
     visible: { 
       opacity: 1,
-      transition: { staggerChildren: 0.1 }
+      transition: { staggerChildren: 0.08 }
     }
   };
 
   const itemVariants = {
-    hidden: { opacity: 0, y: 20 },
+    hidden: { opacity: 0, y: 15 },
     visible: { opacity: 1, y: 0 }
   };
 
@@ -50,30 +97,44 @@ const Home = () => {
       variants={containerVariants}
       initial="hidden"
       animate="visible"
-      className="space-y-10"
+      className="space-y-8 max-w-6xl mx-auto"
     >
-      {/* Hero Welcome */}
-      <section className="relative overflow-hidden rounded-[var(--radius-custom)] p-10 md:p-16 glass-card bg-gradient-to-br from-brand-secondary to-brand-primary border-none shadow-2xl">
-        <div className="absolute top-0 right-0 w-[40%] h-[100%] bg-brand-accent/5 blur-[100px] rounded-full"></div>
-        <div className="relative z-10">
+      {/* Hero Welcome Banner */}
+      <section className="relative overflow-hidden rounded-[var(--radius-custom)] p-8 md:p-14 glass-card bg-gradient-to-br from-brand-secondary to-brand-primary border border-white/5 shadow-2xl">
+        <div className="absolute top-0 right-0 w-[45%] h-[100%] bg-brand-accent/5 blur-[120px] rounded-full pointer-events-none" />
+        
+        <div className="relative z-10 max-w-2xl">
           <motion.div variants={itemVariants} className="flex items-center gap-3 text-brand-accent mb-4">
-            <Sparkles size={18} />
-            <span className="font-bold tracking-widest text-[10px] uppercase">Welcome to your sanctuary</span>
+            <ShieldCheck size={18} />
+            <span className="font-bold tracking-widest text-[10px] uppercase font-mono">
+              Zero-Knowledge Encrypted Sanctuary
+            </span>
           </motion.div>
-          <motion.h1 variants={itemVariants} className="text-4xl md:text-5xl font-black text-white mb-6 leading-tight tracking-tight">
-            Hello, <br />
-            <span className="text-gradient leading-normal">{user?.email?.split('@')[0]}</span>
+
+          <motion.h1 variants={itemVariants} className="text-3xl md:text-5xl font-black text-white mb-4 leading-tight tracking-tight">
+            Welcome home, <br />
+            <span className="text-gradient">{user?.email?.split('@')[0]}</span>
           </motion.h1>
-          <motion.p variants={itemVariants} className="text-lg text-text-dim max-w-xl mb-10 leading-relaxed font-medium">
-            Your private space is ready. Continue your journey of recording thoughts and memories where you left off.
+
+          <motion.p variants={itemVariants} className="text-base text-text-dim mb-8 leading-relaxed font-medium">
+            Your thoughts, audio memories, and photos are safely guarded behind client-side AES-GCM-256 encryption. Take a deep breath and unwind.
           </motion.p>
-          <motion.div variants={itemVariants}>
+
+          <motion.div variants={itemVariants} className="flex flex-wrap items-center gap-4">
             <Link 
               to="/diary"
-              className="inline-flex items-center gap-2 bg-brand-accent hover:bg-brand-accent-hover text-white px-8 py-3.5 rounded-xl font-bold transition-all shadow-lg shadow-brand-accent/20 group text-sm"
+              className="inline-flex items-center gap-2 bg-brand-accent hover:bg-brand-accent-hover text-white px-7 py-3.5 rounded-xl font-bold transition-all shadow-lg shadow-brand-accent/20 group text-sm"
             >
-              Start Writing
-              <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />
+              Start Reflection
+              <ArrowRight size={16} className="group-hover:translate-x-1 transition-transform" />
+            </Link>
+
+            <Link
+              to="/mood"
+              className="inline-flex items-center gap-2 bg-white/5 hover:bg-white/10 text-white px-6 py-3.5 rounded-xl font-bold transition-all border border-white/5 text-sm"
+            >
+              <TrendingUp size={16} className="text-purple-400" />
+              <span>Emotional Flow</span>
             </Link>
           </motion.div>
         </div>
@@ -81,69 +142,113 @@ const Home = () => {
 
       {/* Grid Features */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Resume Card */}
-        <motion.div variants={itemVariants} className="lg:col-span-2 glass-card p-8 rounded-[var(--radius-custom)] flex flex-col justify-between min-h-[300px] ring-1 ring-white/5">
+        {/* Resume Recent Reflection Card */}
+        <motion.div variants={itemVariants} className="lg:col-span-2 glass-card p-6 sm:p-8 rounded-[var(--radius-custom)] flex flex-col justify-between min-h-[260px] border border-white/5">
           <div>
-            <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-              <BookOpen size={20} className="text-brand-accent" />
-              Start where you left off
-            </h3>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                <BookOpen size={18} className="text-brand-accent" />
+                Latest Reflection
+              </h3>
+              {lastEntry?.isEncrypted && (
+                <span className="text-[10px] font-mono text-brand-accent flex items-center gap-1 bg-brand-accent/10 px-2 py-0.5 rounded-md">
+                  <ShieldCheck size={12} />
+                  AES-256 Encrypted
+                </span>
+              )}
+            </div>
+
             {loading ? (
               <div className="space-y-3 animate-pulse">
                 <div className="h-4 bg-white/5 rounded w-3/4"></div>
                 <div className="h-4 bg-white/5 rounded w-1/2"></div>
               </div>
             ) : lastEntry ? (
-              <div>
-                <p className="text-text-dim line-clamp-3 italic mb-4 text-sm leading-relaxed">
-                   "{lastEntry.content}"
+              <div className="space-y-3">
+                <h4 className="font-bold text-white text-base">
+                  {lastEntry.title}
+                </h4>
+                <p className="text-text-dim line-clamp-3 text-sm leading-relaxed font-inter">
+                  {lastEntry.content || "No text preview available."}
                 </p>
-                <div className="flex items-center gap-4 mb-6">
-                   <p className="text-[10px] font-bold text-brand-accent uppercase tracking-widest">
-                      Last updated: {lastEntry.createdAt?.toDate().toLocaleDateString()}
-                   </p>
+                <div className="text-[10px] font-mono text-text-dim">
+                  Last updated: {lastEntry.updatedAt?.toDate?.() ? lastEntry.updatedAt.toDate().toLocaleDateString() : 'Today'}
                 </div>
               </div>
             ) : (
-              <p className="text-text-dim italic mb-6 text-sm">
-                Your diary is empty. Start your first entry today to preserve your story.
+              <p className="text-text-dim italic text-sm">
+                Your sanctuary is clean and ready. Write your first reflection today.
               </p>
             )}
           </div>
-          <Link 
-            to="/diary" 
-            className="text-white font-bold text-sm flex items-center gap-2 hover:text-brand-accent transition-colors group self-start"
-          >
-            {lastEntry ? "Continue Writing" : "Create first entry"}
-            <ArrowRight size={16} className="group-hover:translate-x-1 transition-transform" />
-          </Link>
+
+          <div className="pt-6 mt-6 border-t border-white/5 flex items-center justify-between">
+            <Link 
+              to={lastEntry ? `/diary/${lastEntry.id}` : "/diary"} 
+              className="text-brand-accent font-bold text-xs flex items-center gap-1.5 hover:text-brand-accent-hover transition-colors group"
+            >
+              <span>{lastEntry ? "Continue Writing" : "Create Reflection"}</span>
+              <ArrowRight size={14} className="group-hover:translate-x-1 transition-transform" />
+            </Link>
+
+            <span className="text-xs text-text-dim font-mono">
+              {totalEntries} Total Entries
+            </span>
+          </div>
         </motion.div>
 
-        {/* Media Summary */}
-        <motion.div variants={itemVariants} className="space-y-6">
-           {/* Gallery Card */}
-           <div className="glass-card p-6 rounded-[var(--radius-custom)] hover:bg-white/[0.05] transition-colors group cursor-pointer ring-1 ring-white/5">
-              <div className="w-12 h-12 rounded-xl bg-brand-accent/10 flex items-center justify-center text-brand-accent mb-6 group-hover:scale-110 transition-transform shadow-inner">
-                <ImageIcon size={24} />
+        {/* Media & Sanctuary Tools Stack */}
+        <motion.div variants={itemVariants} className="space-y-4">
+          {/* Gallery Card */}
+          <Link
+            to="/gallery"
+            className="block glass-card p-5 rounded-[var(--radius-custom)] hover:bg-white/[0.04] transition-all border border-white/5 group"
+          >
+            <div className="flex items-center gap-4">
+              <div className="w-11 h-11 rounded-xl bg-purple-500/10 flex items-center justify-center text-purple-400 shrink-0 group-hover:scale-105 transition-transform">
+                <ImageIcon size={20} />
               </div>
-              <h3 className="text-lg font-bold text-white mb-2">Preserve Images</h3>
-              <p className="text-text-dim text-xs mb-6">Your online gallery for personal moments.</p>
-              <Link to="/gallery" className="text-brand-accent text-xs font-bold flex items-center gap-1 group/link">
-                View Gallery <ArrowRight size={12} className="group-hover/link:translate-x-1 transition-transform" />
-              </Link>
-           </div>
+              <div className="min-w-0 flex-1">
+                <h4 className="text-sm font-bold text-white">Memory Vault</h4>
+                <p className="text-xs text-text-dim truncate">Preserve private moments & photos</p>
+              </div>
+              <ArrowRight size={14} className="text-text-dim group-hover:text-white group-hover:translate-x-1 transition-all shrink-0" />
+            </div>
+          </Link>
 
-           {/* Audio Card */}
-           <div className="glass-card p-6 rounded-2xl hover:bg-white/[0.05] transition-colors group cursor-pointer ring-1 ring-white/5">
-              <div className="w-12 h-12 rounded-xl bg-purple-500/10 flex items-center justify-center text-purple-400 mb-6 group-hover:scale-110 transition-transform shadow-inner">
-                <Music size={24} />
+          {/* Audio Box Card */}
+          <Link
+            to="/audio"
+            className="block glass-card p-5 rounded-[var(--radius-custom)] hover:bg-white/[0.04] transition-all border border-white/5 group"
+          >
+            <div className="flex items-center gap-4">
+              <div className="w-11 h-11 rounded-xl bg-pink-500/10 flex items-center justify-center text-pink-400 shrink-0 group-hover:scale-105 transition-transform">
+                <Music size={20} />
               </div>
-              <h3 className="text-lg font-bold text-white mb-2">Melody Box</h3>
-              <p className="text-text-dim text-xs mb-6">Listen to your favorite personal audios.</p>
-              <Link to="/audio" className="text-purple-400 text-xs font-bold flex items-center gap-1 group/link">
-                Open Audio Box <ArrowRight size={12} className="group-hover/link:translate-x-1 transition-transform" />
-              </Link>
-           </div>
+              <div className="min-w-0 flex-1">
+                <h4 className="text-sm font-bold text-white">Audio Box</h4>
+                <p className="text-xs text-text-dim truncate">Voice memos & personal audio</p>
+              </div>
+              <ArrowRight size={14} className="text-text-dim group-hover:text-white group-hover:translate-x-1 transition-all shrink-0" />
+            </div>
+          </Link>
+
+          {/* Emotional Flow Card */}
+          <Link
+            to="/mood"
+            className="block glass-card p-5 rounded-[var(--radius-custom)] hover:bg-white/[0.04] transition-all border border-white/5 group"
+          >
+            <div className="flex items-center gap-4">
+              <div className="w-11 h-11 rounded-xl bg-brand-accent/10 flex items-center justify-center text-brand-accent shrink-0 group-hover:scale-105 transition-transform">
+                <TrendingUp size={20} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h4 className="text-sm font-bold text-white">Emotional Analytics</h4>
+                <p className="text-xs text-text-dim truncate">View mood trends & streak</p>
+              </div>
+              <ArrowRight size={14} className="text-text-dim group-hover:text-white group-hover:translate-x-1 transition-all shrink-0" />
+            </div>
+          </Link>
         </motion.div>
       </div>
     </motion.div>

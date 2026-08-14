@@ -1,13 +1,16 @@
 import React from "react";
 import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./context/AuthContext";
+import { CryptoProvider } from "./context/CryptoContext";
 import Layout from "./components/Layout";
 import AuthModal from "./components/AuthModal";
+import PassphraseModal from "./components/PassphraseModal";
 import Landing from "./pages/Landing";
 import Home from "./pages/Home";
 import Diary from "./pages/Diary";
 import Gallery from "./pages/Gallery";
 import AudioBox from "./pages/AudioBox";
+import MoodDashboard from "./pages/MoodDashboard";
 import "./index.css";
 
 // Protected Route Component
@@ -30,6 +33,7 @@ function AppContent() {
   return (
     <>
       <AuthModal />
+      <PassphraseModal />
       <Routes>
         {/* Public Landing Page */}
         <Route path="/" element={<Landing />} />
@@ -44,6 +48,12 @@ function AppContent() {
         <Route path="/diary/:entryId?" element={
           <ProtectedRoute>
             <Diary />
+          </ProtectedRoute>
+        } />
+
+        <Route path="/mood" element={
+          <ProtectedRoute>
+            <MoodDashboard />
           </ProtectedRoute>
         } />
         
@@ -69,9 +79,11 @@ function AppContent() {
 function App() {
   return (
     <AuthProvider>
-      <Router>
-        <AppContent />
-      </Router>
+      <CryptoProvider>
+        <Router>
+          <AppContent />
+        </Router>
+      </CryptoProvider>
     </AuthProvider>
   );
 }
