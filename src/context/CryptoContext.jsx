@@ -1,48 +1,69 @@
-import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import { useAuth } from './AuthContext';
 import { db } from '../firebase/config';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import {
-  deriveKey,
+  deriveMasterKey,
   generateDEK,
   wrapDEK,
   unwrapDEK,
   encrypt,
   decrypt,
   generateSalt,
-  generateRecoveryKey,
-  isCryptoAvailable,
+  bytesToHex,
+  hexToBytes,
+  sha256Hex,
+  isWebCryptoAvailable,
+  generateRecoveryPhrase,
 } from '../lib/crypto';
 
 const CryptoContext = createContext();
 
 export const useCrypto = () => useContext(CryptoContext);
 
-/**
- * CryptoProvider manages the full encryption lifecycle:
- * 
- * 1. On first login → shows setup modal → user creates passphrase
- *    → generates salt + DEK → wraps DEK with master key → stores wrapped DEK + salt in Firestore
- * 
- * 2. On subsequent logins → shows unlock modal → user enters passphrase
- *    → derives master key → unwraps DEK from Firestore → DEK held in memory
- * 
- * 3. On logout / tab close → DEK wiped from memory
- * 
- * The DEK is NEVER persisted to disk or cloud. Only the wrapped (encrypted) DEK is stored.
- */
+const INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes auto-lock
+
 export const CryptoProvider = ({ children }) => {
   const { user } = useAuth();
   
-  // Core crypto state — DEK lives only in memory
+  // DEK lives strictly in transient JavaScript heap memory
   const [dek, setDek] = useState(null);
   const [isLocked, setIsLocked] = useState(true);
   const [needsSetup, setNeedsSetup] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
-  const [recoveryKey, setRecoveryKey] = useState('');
+  const [recoveryPhrase, setRecoveryPhrase] = useState('');
+  
+  const inactivityTimerRef = useRef(null);
 
-  // Check if user has existing encryption keys in Firestore
+  // Inactivity auto-lock handler
+  const resetInactivityTimer = useCallback(() => {
+    if (inactivityTimerRef.current) {
+      clearTimeout(inactivityTimerRef.current);
+    }
+    if (dek) {
+      inactivityTimerRef.current = setTimeout(() => {
+        setDek(null);
+        setIsLocked(true);
+      }, INACTIVITY_TIMEOUT_MS);
+    }
+  }, [dek]);
+
+  useEffect(() => {
+    const handleUserActivity = () => resetInactivityTimer();
+    window.addEventListener('mousemove', handleUserActivity);
+    window.addEventListener('keydown', handleUserActivity);
+    window.addEventListener('touchstart', handleUserActivity);
+
+    return () => {
+      window.removeEventListener('mousemove', handleUserActivity);
+      window.removeEventListener('keydown', handleUserActivity);
+      window.removeEventListener('touchstart', handleUserActivity);
+      if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current);
+    };
+  }, [resetInactivityTimer]);
+
+  // Check if user has established encryption keys in Firestore
   useEffect(() => {
     if (!user) {
       setDek(null);
@@ -62,7 +83,7 @@ export const CryptoProvider = ({ children }) => {
           setNeedsSetup(true);
         }
       } catch (err) {
-        console.error('Failed to check crypto setup:', err);
+        console.error('Crypto check failed:', err);
         setNeedsSetup(true);
       } finally {
         setIsLoading(false);
@@ -73,143 +94,104 @@ export const CryptoProvider = ({ children }) => {
   }, [user]);
 
   /**
-   * First-time setup: create passphrase, generate DEK, wrap and store.
+   * Vault Setup: Derive Master Key, generate DEK, wrap and store in Firestore.
    */
   const setupEncryption = useCallback(async (passphrase) => {
-    if (!user) throw new Error('No authenticated user');
+    if (!user) throw new Error('No authenticated user found');
     setError('');
 
     try {
-      // Generate unique salt for this user
       const salt = generateSalt();
-      
-      // Derive master key from passphrase
-      const masterKey = await deriveKey(passphrase, salt);
-      
-      // Generate random Data Encryption Key
+      const masterKey = await deriveMasterKey(passphrase, salt);
       const newDek = await generateDEK();
-      
-      // Wrap DEK with master key for safe cloud storage
       const { wrappedKey, iv } = await wrapDEK(newDek, masterKey);
-      
-      // Generate recovery key for user to write down
-      const recovery = generateRecoveryKey();
+      const mnemonic = generateRecoveryPhrase();
+      const recoveryHash = await sha256Hex(mnemonic);
 
-      // Store wrapped DEK + salt in Firestore (never the raw DEK or passphrase)
       await setDoc(doc(db, 'users', user.uid), {
         wrappedKey,
         wrappedKeyIv: iv,
-        salt: Array.from(salt).map(b => b.toString(16).padStart(2, '0')).join(''),
-        recoveryKeyHash: await hashRecoveryKey(recovery),
-        createdAt: new Date().toISOString(),
+        salt: bytesToHex(salt),
+        recoveryHash,
+        updatedAt: new Date().toISOString(),
       }, { merge: true });
 
-      // Hold DEK in memory — this is the only place the raw DEK exists
       setDek(newDek);
       setIsLocked(false);
       setNeedsSetup(false);
-      setRecoveryKey(recovery);
-      
-      return recovery;
+      setRecoveryPhrase(mnemonic);
+      resetInactivityTimer();
+
+      return mnemonic;
     } catch (err) {
-      console.error('Encryption setup failed:', err);
-      setError('Failed to set up encryption. Please try again.');
+      console.error('Vault setup failed:', err);
+      setError('Failed to configure encryption vault.');
       throw err;
     }
-  }, [user]);
+  }, [user, resetInactivityTimer]);
 
   /**
-   * Unlock: derive master key from passphrase, unwrap DEK.
+   * Unlock Vault: Derive Master Key and unwrap the DEK.
    */
   const unlockVault = useCallback(async (passphrase) => {
-    if (!user) throw new Error('No authenticated user');
+    if (!user) throw new Error('No authenticated user found');
     setError('');
 
     try {
       const cryptoDoc = await getDoc(doc(db, 'users', user.uid));
       if (!cryptoDoc.exists()) {
-        throw new Error('No encryption keys found. Please set up encryption first.');
+        throw new Error('Encryption vault not found.');
       }
 
       const data = cryptoDoc.data();
-      
-      // Reconstruct salt from hex string
-      const saltHex = data.salt;
-      const salt = new Uint8Array(
-        saltHex.match(/.{2}/g).map(byte => parseInt(byte, 16))
-      );
-
-      // Derive master key from passphrase + stored salt
-      const masterKey = await deriveKey(passphrase, salt);
-
-      // Unwrap DEK — this will throw if passphrase is wrong (GCM auth failure)
+      const salt = hexToBytes(data.salt);
+      const masterKey = await deriveMasterKey(passphrase, salt);
       const unwrappedDek = await unwrapDEK(data.wrappedKey, data.wrappedKeyIv, masterKey);
 
       setDek(unwrappedDek);
       setIsLocked(false);
       setError('');
+      resetInactivityTimer();
     } catch (err) {
       console.error('Unlock failed:', err);
-      if (err.name === 'OperationError') {
-        setError('Incorrect passphrase. Please try again.');
-      } else {
-        setError(err.message || 'Failed to unlock vault.');
-      }
+      setError('Incorrect passphrase or corrupted key data.');
       throw err;
     }
-  }, [user]);
+  }, [user, resetInactivityTimer]);
 
   /**
-   * Lock vault — clear DEK from memory.
+   * Manually lock vault and wipe session keys.
    */
   const lockVault = useCallback(() => {
     setDek(null);
     setIsLocked(true);
+    if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current);
   }, []);
 
   /**
-   * Encrypt text content using the session DEK.
+   * Encrypt text payload using the active session DEK.
    */
   const encryptText = useCallback(async (plaintext) => {
-    if (!dek) throw new Error('Vault is locked. Unlock first.');
+    if (!dek) throw new Error('Vault is locked. Unlock before encrypting.');
     if (!plaintext) return { ciphertext: '', iv: '' };
     return encrypt(plaintext, dek);
   }, [dek]);
 
   /**
-   * Decrypt text content using the session DEK.
+   * Decrypt ciphertext payload using the active session DEK.
    */
   const decryptText = useCallback(async (ciphertext, iv) => {
-    if (!dek) throw new Error('Vault is locked. Unlock first.');
+    if (!dek) throw new Error('Vault is locked. Unlock before decrypting.');
     if (!ciphertext || !iv) return '';
     try {
       return await decrypt(ciphertext, iv, dek);
     } catch (err) {
       console.error('Decryption failed:', err);
-      return '[Decryption failed — data may be corrupted]';
+      return '[Decryption failed — content may be altered or corrupted]';
     }
   }, [dek]);
 
-  /**
-   * Hash recovery key for verification (not reversible).
-   */
-  async function hashRecoveryKey(key) {
-    const encoder = new TextEncoder();
-    const hashBuffer = await crypto.subtle.digest('SHA-256', encoder.encode(key));
-    return Array.from(new Uint8Array(hashBuffer))
-      .map(b => b.toString(16).padStart(2, '0'))
-      .join('');
-  }
-
-  // Clear DEK on logout
-  useEffect(() => {
-    if (!user) {
-      setDek(null);
-      setIsLocked(true);
-    }
-  }, [user]);
-
-  // Clear DEK when tab is closing (defense in depth)
+  // Clean memory on tab close
   useEffect(() => {
     const handleBeforeUnload = () => {
       setDek(null);
@@ -219,21 +201,18 @@ export const CryptoProvider = ({ children }) => {
   }, []);
 
   const value = {
-    // State
     isLocked,
     needsSetup,
     isLoading,
     error,
-    recoveryKey,
-    isAvailable: isCryptoAvailable(),
-    
-    // Actions
+    recoveryPhrase,
+    isAvailable: isWebCryptoAvailable(),
     setupEncryption,
     unlockVault,
     lockVault,
     encryptText,
     decryptText,
-    clearRecoveryKey: () => setRecoveryKey(''),
+    clearRecoveryPhrase: () => setRecoveryPhrase(''),
     clearError: () => setError(''),
   };
 
