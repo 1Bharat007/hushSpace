@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useCrypto } from "../context/CryptoContext";
 import { useSyncStatus } from "../hooks/useSyncStatus";
@@ -22,10 +22,9 @@ import {
   deleteLocalEntry,
   enqueueOfflineMutation
 } from "../lib/storage/indexedDb";
-import { motion, AnimatePresence } from "framer-motion";
+import ZenEditor from "../components/editor/ZenEditor";
 import { 
   Plus, 
-  Clock, 
   Search, 
   BookOpen, 
   Trash2, 
@@ -105,7 +104,7 @@ const Diary = () => {
               decTitle = await decryptText(docData.titleCiphertext, docData.titleIv);
             }
           } catch (err) {
-            decContent = "[Encrypted entry — unlock vault to view]";
+            decContent = "[Encrypted reflection — unlock vault to view]";
           }
         }
 
@@ -165,15 +164,11 @@ const Diary = () => {
       async (snapshot) => {
         const rawDocs = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
         
-        // Cache to local IndexedDB
         await bulkPutLocalEntries(rawDocs);
-
-        // Decrypt doc contents
         const decryptedDocs = await decryptDocList(rawDocs);
         setEntries(decryptedDocs);
         setLoading(false);
 
-        // Load active entry
         const currentActive = entryId 
           ? decryptedDocs.find((d) => d.id === entryId) 
           : decryptedDocs[0];
@@ -191,7 +186,7 @@ const Diary = () => {
         }
       },
       (err) => {
-        console.warn("Firestore snapshot offline/restricted; relying on IndexedDB cache:", err);
+        console.warn("Firestore snapshot offline; relying on IndexedDB cache:", err);
         setLoading(false);
       }
     );
@@ -199,7 +194,7 @@ const Diary = () => {
     return unsubscribe;
   }, [user, entryId, isLocked, decryptText, navigate]);
 
-  // Handle auto-save: Local IndexedDB first + Firestore sync (or offline queue)
+  // Handle auto-save: Local IndexedDB first + Firestore sync
   useEffect(() => {
     if (!activeEntryId || loading) return;
 
@@ -240,10 +235,8 @@ const Diary = () => {
           };
         }
 
-        // 1. Save to local IndexedDB immediately (instant persistence)
         await putLocalEntry(payload);
 
-        // 2. Sync to Cloud Firestore if online, or enqueue for later
         if (navigator.onLine) {
           await updateDoc(doc(db, "entries", activeEntryId), {
             ...payload,
@@ -259,7 +252,7 @@ const Diary = () => {
         }
       } catch (error) {
         console.error("Save failed:", error);
-        setErrorMsg("Saved to offline cache. Will sync when connection is stable.");
+        setErrorMsg("Saved to offline cache. Will sync when connection is restored.");
       } finally {
         setTimeout(() => setSaving(false), 500);
       }
@@ -304,10 +297,8 @@ const Diary = () => {
         };
       }
 
-      // Save locally first
       await putLocalEntry(initialPayload);
 
-      // Push to remote if online
       if (navigator.onLine) {
         const docRef = await addDoc(collection(db, "entries"), {
           ...initialPayload,
@@ -342,7 +333,7 @@ const Diary = () => {
   // Delete entry
   const deleteEntry = async (id, e) => {
     e.stopPropagation();
-    if (!window.confirm("Are you sure you want to permanently delete this memory?")) return;
+    if (!window.confirm("Are you sure you want to delete this reflection?")) return;
     setErrorMsg("");
 
     try {
@@ -400,14 +391,6 @@ const Diary = () => {
     setContent(formatted);
     setShowPromptPicker(false);
   };
-
-  const wordCount = useMemo(() => {
-    return content.trim() ? content.trim().split(/\s+/).length : 0;
-  }, [content]);
-
-  const readingTimeMinutes = useMemo(() => {
-    return Math.max(1, Math.ceil(wordCount / 200));
-  }, [wordCount]);
 
   const filteredEntries = entries.filter(
     (e) =>
@@ -565,7 +548,7 @@ const Diary = () => {
         {activeEntryId ? (
           <>
             {/* Header: Title + Save Status */}
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between pb-4 border-b border-white/10 gap-3 mb-4">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between pb-3 border-b border-white/10 gap-3 mb-3">
               <input
                 type="text"
                 value={title}
@@ -590,7 +573,7 @@ const Diary = () => {
             </div>
 
             {/* Toolbar: Mood Selector + Prompt Picker Button + Tags */}
-            <div className="flex flex-wrap items-center justify-between gap-3 pb-3 mb-3 border-b border-white/5">
+            <div className="flex flex-wrap items-center justify-between gap-3 pb-3 mb-2 border-b border-white/5">
               {/* Mood Selector */}
               <div className="flex items-center gap-1.5">
                 <span className="text-xs text-text-dim mr-1 flex items-center gap-1">
@@ -657,7 +640,7 @@ const Diary = () => {
             </div>
 
             {/* Tags Ribbon */}
-            <div className="flex flex-wrap items-center gap-2 mb-4">
+            <div className="flex flex-wrap items-center gap-2 mb-3">
               <Tag size={13} className="text-text-dim" />
               {tags.map((t) => (
                 <span
@@ -680,25 +663,12 @@ const Diary = () => {
               />
             </div>
 
-            {/* Textarea */}
-            <textarea
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              placeholder="Write your thoughts. Encrypted client-side and cached offline in IndexedDB..."
-              className="flex-1 w-full bg-transparent text-white/90 outline-none resize-none text-sm sm:text-base leading-relaxed placeholder:text-white/20 font-inter"
+            {/* Zen Editor Component */}
+            <ZenEditor
+              content={content}
+              onChange={setContent}
+              placeholder="Write your unfiltered thoughts freely. Everything is encrypted before leaving your browser and cached offline in IndexedDB..."
             />
-
-            {/* Footer Stats Bar */}
-            <div className="pt-4 border-t border-white/10 flex items-center justify-between text-[11px] text-text-dim font-mono">
-              <div className="flex items-center gap-4">
-                <span>{wordCount} words</span>
-                <span>~{readingTimeMinutes} min read</span>
-              </div>
-              <div className="flex items-center gap-1.5 text-brand-accent">
-                <ShieldCheck size={14} />
-                <span>IndexedDB + AES-256 Vault</span>
-              </div>
-            </div>
           </>
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-center p-8">
