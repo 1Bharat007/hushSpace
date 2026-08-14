@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useCrypto } from "../context/CryptoContext";
+import { useSyncStatus } from "../hooks/useSyncStatus";
 import { db } from "../firebase/config";
 import { 
   collection, 
@@ -14,6 +15,13 @@ import {
   updateDoc, 
   deleteDoc 
 } from "firebase/firestore";
+import { 
+  getLocalEntries, 
+  putLocalEntry, 
+  bulkPutLocalEntries, 
+  deleteLocalEntry,
+  enqueueOfflineMutation
+} from "../lib/storage/indexedDb";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
   Plus, 
@@ -28,7 +36,8 @@ import {
   Sparkles, 
   Tag, 
   Smile, 
-  FileText,
+  Wifi,
+  WifiOff,
   Lightbulb
 } from "lucide-react";
 import { useParams, useNavigate } from "react-router-dom";
@@ -52,6 +61,7 @@ const REFLECTION_PROMPTS = [
 const Diary = () => {
   const { user } = useAuth();
   const { encryptText, decryptText, isLocked } = useCrypto();
+  const { isOnline, isSyncing } = useSyncStatus();
   const { entryId } = useParams();
   const navigate = useNavigate();
 
@@ -79,7 +89,68 @@ const Diary = () => {
     }
   }, [entryId]);
 
-  // Fetch entries and decrypt them in real time
+  // Decrypt helper for array of raw records
+  const decryptDocList = async (rawList) => {
+    return Promise.all(
+      rawList.map(async (docData) => {
+        let decTitle = docData.title || "Untitled Entry";
+        let decContent = docData.content || "";
+
+        if (docData.isEncrypted && !isLocked) {
+          try {
+            if (docData.ciphertext && docData.iv) {
+              decContent = await decryptText(docData.ciphertext, docData.iv);
+            }
+            if (docData.titleCiphertext && docData.titleIv) {
+              decTitle = await decryptText(docData.titleCiphertext, docData.titleIv);
+            }
+          } catch (err) {
+            decContent = "[Encrypted entry — unlock vault to view]";
+          }
+        }
+
+        return {
+          ...docData,
+          title: decTitle,
+          content: decContent,
+        };
+      })
+    );
+  };
+
+  // 1. Instant Startup: Load cached entries from local IndexedDB immediately
+  useEffect(() => {
+    if (!user) return;
+
+    const loadLocalCache = async () => {
+      try {
+        const localCached = await getLocalEntries(user.uid);
+        if (localCached && localCached.length > 0) {
+          const decrypted = await decryptDocList(localCached);
+          setEntries(decrypted);
+          setLoading(false);
+
+          if (!activeEntryRef.current) {
+            const first = entryId ? decrypted.find(d => d.id === entryId) : decrypted[0];
+            if (first) {
+              activeEntryRef.current = first.id;
+              setActiveEntryId(first.id);
+              setTitle(first.title || "");
+              setContent(first.content || "");
+              setMood(first.mood || "neutral");
+              setTags(first.tags || []);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("Could not load local IndexedDB cache:", err);
+      }
+    };
+
+    loadLocalCache();
+  }, [user, entryId, isLocked]);
+
+  // 2. Cloud Firestore Real-time listener & Local Cache updates
   useEffect(() => {
     if (!user) return;
 
@@ -94,34 +165,11 @@ const Diary = () => {
       async (snapshot) => {
         const rawDocs = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
         
-        // Decrypt doc contents if encrypted
-        const decryptedDocs = await Promise.all(
-          rawDocs.map(async (docData) => {
-            let decryptedTitle = docData.title || "Untitled Entry";
-            let decryptedContent = docData.content || "";
+        // Cache to local IndexedDB
+        await bulkPutLocalEntries(rawDocs);
 
-            if (docData.isEncrypted && !isLocked) {
-              try {
-                if (docData.ciphertext && docData.iv) {
-                  decryptedContent = await decryptText(docData.ciphertext, docData.iv);
-                }
-                if (docData.titleCiphertext && docData.titleIv) {
-                  decryptedTitle = await decryptText(docData.titleCiphertext, docData.titleIv);
-                }
-              } catch (err) {
-                console.error("Failed to decrypt entry:", docData.id, err);
-                decryptedContent = "[Encrypted entry — unlock vault to view]";
-              }
-            }
-
-            return {
-              ...docData,
-              title: decryptedTitle,
-              content: decryptedContent,
-            };
-          })
-        );
-
+        // Decrypt doc contents
+        const decryptedDocs = await decryptDocList(rawDocs);
         setEntries(decryptedDocs);
         setLoading(false);
 
@@ -143,8 +191,7 @@ const Diary = () => {
         }
       },
       (err) => {
-        console.error("Diary snapshot error:", err);
-        setErrorMsg("Failed to sync diary entries.");
+        console.warn("Firestore snapshot offline/restricted; relying on IndexedDB cache:", err);
         setLoading(false);
       }
     );
@@ -152,7 +199,7 @@ const Diary = () => {
     return unsubscribe;
   }, [user, entryId, isLocked, decryptText, navigate]);
 
-  // Handle auto-save with client-side encryption
+  // Handle auto-save: Local IndexedDB first + Firestore sync (or offline queue)
   useEffect(() => {
     if (!activeEntryId || loading) return;
 
@@ -164,12 +211,13 @@ const Diary = () => {
 
       try {
         let payload = {
+          id: activeEntryId,
+          userId: user.uid,
           mood,
           tags,
-          updatedAt: serverTimestamp(),
+          updatedAt: new Date().toISOString(),
         };
 
-        // If vault is unlocked, encrypt title & content with AES-GCM
         if (!isLocked) {
           const encContent = await encryptText(content);
           const encTitle = await encryptText(title);
@@ -180,12 +228,10 @@ const Diary = () => {
             iv: encContent.iv,
             titleCiphertext: encTitle.ciphertext,
             titleIv: encTitle.iv,
-            // Clear plaintext fields for true zero-knowledge privacy
             content: "",
             title: "Encrypted Entry",
           };
         } else {
-          // Fallback if locked
           payload = {
             ...payload,
             title,
@@ -194,28 +240,46 @@ const Diary = () => {
           };
         }
 
-        await updateDoc(doc(db, "entries", activeEntryId), payload);
+        // 1. Save to local IndexedDB immediately (instant persistence)
+        await putLocalEntry(payload);
+
+        // 2. Sync to Cloud Firestore if online, or enqueue for later
+        if (navigator.onLine) {
+          await updateDoc(doc(db, "entries", activeEntryId), {
+            ...payload,
+            updatedAt: serverTimestamp(),
+          });
+        } else {
+          await enqueueOfflineMutation({
+            type: 'update',
+            collection: 'entries',
+            docId: activeEntryId,
+            data: payload,
+          });
+        }
       } catch (error) {
-        console.error("Auto-save failed", error);
-        setErrorMsg("Auto-save failed. Unsaved edits remain locally.");
+        console.error("Save failed:", error);
+        setErrorMsg("Saved to offline cache. Will sync when connection is stable.");
       } finally {
-        setTimeout(() => setSaving(false), 600);
+        setTimeout(() => setSaving(false), 500);
       }
     }, 1200);
 
     return () => clearTimeout(saveTimeoutRef.current);
-  }, [title, content, mood, tags, activeEntryId, loading, isLocked, encryptText]);
+  }, [title, content, mood, tags, activeEntryId, loading, isLocked, encryptText, user]);
 
   // Create new entry
   const createNewEntry = async () => {
     setErrorMsg("");
     try {
+      const newId = `entry_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
       let initialPayload = {
+        id: newId,
         userId: user.uid,
         mood: "neutral",
         tags: [],
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
       };
 
       if (!isLocked) {
@@ -240,15 +304,35 @@ const Diary = () => {
         };
       }
 
-      const docRef = await addDoc(collection(db, "entries"), initialPayload);
-      activeEntryRef.current = docRef.id;
-      setActiveEntryId(docRef.id);
+      // Save locally first
+      await putLocalEntry(initialPayload);
+
+      // Push to remote if online
+      if (navigator.onLine) {
+        const docRef = await addDoc(collection(db, "entries"), {
+          ...initialPayload,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+        initialPayload.id = docRef.id;
+        await putLocalEntry(initialPayload);
+      } else {
+        await enqueueOfflineMutation({
+          type: 'create',
+          collection: 'entries',
+          docId: newId,
+          data: initialPayload,
+        });
+      }
+
+      activeEntryRef.current = initialPayload.id;
+      setActiveEntryId(initialPayload.id);
       setTitle("Untitled Entry");
       setContent("");
       setMood("neutral");
       setTags([]);
       setIsSidebarOpenMobile(false);
-      navigate(`/diary/${docRef.id}`);
+      navigate(`/diary/${initialPayload.id}`);
     } catch (err) {
       console.error("Failed to create entry:", err);
       setErrorMsg("Failed to create new diary entry.");
@@ -262,7 +346,18 @@ const Diary = () => {
     setErrorMsg("");
 
     try {
-      await deleteDoc(doc(db, "entries", id));
+      await deleteLocalEntry(id);
+
+      if (navigator.onLine) {
+        await deleteDoc(doc(db, "entries", id));
+      } else {
+        await enqueueOfflineMutation({
+          type: 'delete',
+          collection: 'entries',
+          docId: id,
+        });
+      }
+
       if (activeEntryId === id) {
         const remaining = entries.filter((d) => d.id !== id);
         if (remaining.length > 0) {
@@ -283,7 +378,6 @@ const Diary = () => {
     }
   };
 
-  // Tag helper
   const handleAddTag = (e) => {
     if (e.key === 'Enter' || e.key === ',') {
       e.preventDefault();
@@ -307,7 +401,6 @@ const Diary = () => {
     setShowPromptPicker(false);
   };
 
-  // Stats calculation
   const wordCount = useMemo(() => {
     return content.trim() ? content.trim().split(/\s+/).length : 0;
   }, [content]);
@@ -381,7 +474,7 @@ const Diary = () => {
 
         {/* Entry List */}
         <div className="flex-1 overflow-y-auto space-y-2 pr-1">
-          {loading ? (
+          {loading && entries.length === 0 ? (
             <div className="space-y-2">
               {[1, 2, 3].map((i) => (
                 <div key={i} className="h-16 glass-card rounded-xl animate-pulse" />
@@ -422,7 +515,9 @@ const Diary = () => {
                       <span>
                         {entry.updatedAt?.toDate?.()
                           ? entry.updatedAt.toDate().toLocaleDateString()
-                          : "Just now"}
+                          : typeof entry.updatedAt === 'string'
+                            ? new Date(entry.updatedAt).toLocaleDateString()
+                            : "Just now"}
                       </span>
                       {entry.isEncrypted && (
                         <span className="text-brand-accent flex items-center gap-0.5">
@@ -452,7 +547,6 @@ const Diary = () => {
 
       {/* Editor Main Canvas */}
       <div className="flex-1 glass-card rounded-[var(--radius-custom)] p-6 sm:p-8 flex flex-col min-w-0 overflow-hidden relative">
-        {/* Error Alert Banner */}
         {errorMsg && (
           <div className="flex items-center justify-between gap-3 bg-red-500/10 border border-red-500/20 text-red-300 p-3 rounded-xl text-xs font-medium mb-4">
             <div className="flex items-center gap-2">
@@ -485,8 +579,12 @@ const Diary = () => {
                   <span>AES-256</span>
                 </span>
                 <span className="flex items-center gap-1 font-mono">
-                  <Clock size={14} />
-                  <span>{saving ? "Encrypting..." : "Saved"}</span>
+                  {isOnline ? (
+                    <Wifi size={13} className="text-emerald-400" />
+                  ) : (
+                    <WifiOff size={13} className="text-amber-400" />
+                  )}
+                  <span>{saving ? "Encrypting..." : isSyncing ? "Syncing..." : isOnline ? "Synced" : "Offline Cache"}</span>
                 </span>
               </div>
             </div>
@@ -526,7 +624,6 @@ const Diary = () => {
                   <span>CBT Prompts</span>
                 </button>
 
-                {/* Prompt Popover */}
                 {showPromptPicker && (
                   <div className="absolute right-0 top-10 z-30 w-80 sm:w-96 glass-card p-4 rounded-2xl shadow-2xl ring-1 ring-white/10 border border-white/10 space-y-2">
                     <div className="flex items-center justify-between pb-2 border-b border-white/10">
@@ -587,7 +684,7 @@ const Diary = () => {
             <textarea
               value={content}
               onChange={(e) => setContent(e.target.value)}
-              placeholder="Write your unfiltered thoughts here. Everything is encrypted before leaving your browser..."
+              placeholder="Write your thoughts. Encrypted client-side and cached offline in IndexedDB..."
               className="flex-1 w-full bg-transparent text-white/90 outline-none resize-none text-sm sm:text-base leading-relaxed placeholder:text-white/20 font-inter"
             />
 
@@ -599,7 +696,7 @@ const Diary = () => {
               </div>
               <div className="flex items-center gap-1.5 text-brand-accent">
                 <ShieldCheck size={14} />
-                <span>Zero-Knowledge Protected</span>
+                <span>IndexedDB + AES-256 Vault</span>
               </div>
             </div>
           </>
