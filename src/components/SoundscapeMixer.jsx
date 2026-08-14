@@ -11,11 +11,11 @@ import {
   Radio, 
   Clock, 
   X, 
-  Play, 
-  Pause,
-  Sliders
+  Sliders,
+  MoveHorizontal
 } from 'lucide-react';
 import ambientEngine from '../lib/ambientEngine';
+import SoundscapePresets from './audio/SoundscapePresets';
 
 const SOUNDS = [
   { id: 'brown', name: 'Brown Noise', desc: 'Deep soothing rumble', icon: Radio, color: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/30' },
@@ -36,12 +36,19 @@ const SoundscapeMixer = ({ isOpen, onClose }) => {
     forest: 0.5,
     binaural: 0.4,
   });
+  const [pans, setPans] = useState({
+    brown: 0,
+    rain: 0,
+    ocean: 0,
+    campfire: 0,
+    forest: 0,
+    binaural: 0,
+  });
   const [masterVolume, setMasterVolume] = useState(0.8);
   const [isMuted, setIsMuted] = useState(false);
   const [timerMinutes, setTimerMinutes] = useState(0);
   const [remainingTime, setRemainingTime] = useState(0);
 
-  // Sync state with active engine tracks
   const toggleTrack = (soundId) => {
     const isCurrentlyActive = !!activeTracks[soundId];
     if (isCurrentlyActive) {
@@ -53,12 +60,13 @@ const SoundscapeMixer = ({ isOpen, onClose }) => {
       });
     } else {
       const vol = volumes[soundId] || 0.5;
-      if (soundId === 'brown') ambientEngine.startBrownNoise(vol);
-      else if (soundId === 'rain') ambientEngine.startRain(vol);
-      else if (soundId === 'ocean') ambientEngine.startOcean(vol);
-      else if (soundId === 'campfire') ambientEngine.startCampfire(vol);
-      else if (soundId === 'forest') ambientEngine.startForest(vol);
-      else if (soundId === 'binaural') ambientEngine.startBinaural(vol);
+      const pan = pans[soundId] || 0;
+      if (soundId === 'brown') ambientEngine.startBrownNoise(vol, pan);
+      else if (soundId === 'rain') ambientEngine.startRain(vol, pan);
+      else if (soundId === 'ocean') ambientEngine.startOcean(vol, pan);
+      else if (soundId === 'campfire') ambientEngine.startCampfire(vol, pan);
+      else if (soundId === 'forest') ambientEngine.startForest(vol, pan);
+      else if (soundId === 'binaural') ambientEngine.startBinaural(vol, pan);
 
       setActiveTracks((prev) => ({ ...prev, [soundId]: true }));
     }
@@ -68,6 +76,12 @@ const SoundscapeMixer = ({ isOpen, onClose }) => {
     const newVol = parseFloat(val);
     setVolumes((prev) => ({ ...prev, [soundId]: newVol }));
     ambientEngine.setTrackVolume(soundId, newVol);
+  };
+
+  const handlePanChange = (soundId, val) => {
+    const newPan = parseFloat(val);
+    setPans((prev) => ({ ...prev, [soundId]: newPan }));
+    ambientEngine.setTrackPan(soundId, newPan);
   };
 
   const handleMasterVolumeChange = (val) => {
@@ -86,6 +100,31 @@ const SoundscapeMixer = ({ isOpen, onClose }) => {
       ambientEngine.setMasterVolume(0);
       setIsMuted(true);
     }
+  };
+
+  const handleApplyPreset = (preset) => {
+    ambientEngine.stopAll();
+    const newActive = {};
+    const newVolumes = { ...volumes };
+    const newPans = { ...pans };
+
+    Object.entries(preset.tracks).forEach(([trackId, vol]) => {
+      newVolumes[trackId] = vol;
+      const pan = preset.pans?.[trackId] || 0;
+      newPans[trackId] = pan;
+      newActive[trackId] = true;
+
+      if (trackId === 'brown') ambientEngine.startBrownNoise(vol, pan);
+      else if (trackId === 'rain') ambientEngine.startRain(vol, pan);
+      else if (trackId === 'ocean') ambientEngine.startOcean(vol, pan);
+      else if (trackId === 'campfire') ambientEngine.startCampfire(vol, pan);
+      else if (trackId === 'forest') ambientEngine.startForest(vol, pan);
+      else if (trackId === 'binaural') ambientEngine.startBinaural(vol, pan);
+    });
+
+    setVolumes(newVolumes);
+    setPans(newPans);
+    setActiveTracks(newActive);
   };
 
   const handleSetTimer = (mins) => {
@@ -138,7 +177,7 @@ const SoundscapeMixer = ({ isOpen, onClose }) => {
           initial={{ opacity: 0, scale: 0.95, y: 20 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95, y: 20 }}
-          className="relative w-full max-w-2xl glass-card p-6 sm:p-8 rounded-3xl shadow-2xl ring-1 ring-white/10 max-h-[90vh] flex flex-col overflow-hidden"
+          className="relative w-full max-w-3xl glass-card p-6 sm:p-8 rounded-3xl shadow-2xl ring-1 ring-white/10 max-h-[90vh] flex flex-col overflow-hidden"
         >
           {/* Header */}
           <div className="flex items-center justify-between pb-4 border-b border-white/10">
@@ -148,13 +187,13 @@ const SoundscapeMixer = ({ isOpen, onClose }) => {
               </div>
               <div>
                 <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                  Ambient Sanctuary
+                  Soundscape Studio & Spatial Mixer
                   {hasAnyActive && (
                     <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
                   )}
                 </h2>
                 <p className="text-xs text-text-dim">
-                  Procedural Web Audio soundscapes for deep focus & meditation
+                  Procedural Web Audio synthesis with spatial panning & binaural focus
                 </p>
               </div>
             </div>
@@ -177,13 +216,21 @@ const SoundscapeMixer = ({ isOpen, onClose }) => {
             </div>
           </div>
 
-          {/* Sound Grid */}
-          <div className="flex-1 overflow-y-auto py-6 space-y-4 pr-1">
+          {/* Body Content */}
+          <div className="flex-1 overflow-y-auto py-5 space-y-6 pr-1">
+            {/* Presets Bar */}
+            <SoundscapePresets
+              onApplyPreset={handleApplyPreset}
+              currentMix={{ active: activeTracks, volumes, pans }}
+            />
+
+            {/* Multi-Track Spatial Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {SOUNDS.map((sound) => {
                 const Icon = sound.icon;
                 const isActive = !!activeTracks[sound.id];
                 const volume = volumes[sound.id] || 0.5;
+                const pan = pans[sound.id] || 0;
 
                 return (
                   <div
@@ -229,22 +276,44 @@ const SoundscapeMixer = ({ isOpen, onClose }) => {
                       </button>
                     </div>
 
-                    {/* Track Volume Slider */}
+                    {/* Controls (Volume + Spatial Pan) */}
                     {isActive && (
-                      <div className="pt-2 border-t border-white/5 flex items-center gap-3">
-                        <Volume2 size={14} className="text-text-dim shrink-0" />
-                        <input
-                          type="range"
-                          min="0"
-                          max="1"
-                          step="0.01"
-                          value={volume}
-                          onChange={(e) => handleVolumeChange(sound.id, e.target.value)}
-                          className="w-full h-1 bg-white/10 rounded-lg appearance-none cursor-pointer accent-brand-accent"
-                        />
-                        <span className="text-[10px] font-mono text-text-dim w-7 text-right">
-                          {Math.round(volume * 100)}%
-                        </span>
+                      <div className="pt-2 border-t border-white/5 space-y-2">
+                        {/* Volume Slider */}
+                        <div className="flex items-center gap-3">
+                          <Volume2 size={13} className="text-text-dim shrink-0" />
+                          <input
+                            type="range"
+                            min="0"
+                            max="1"
+                            step="0.01"
+                            value={volume}
+                            onChange={(e) => handleVolumeChange(sound.id, e.target.value)}
+                            className="w-full h-1 bg-white/10 rounded-lg appearance-none cursor-pointer accent-brand-accent"
+                          />
+                          <span className="text-[10px] font-mono text-text-dim w-7 text-right">
+                            {Math.round(volume * 100)}%
+                          </span>
+                        </div>
+
+                        {/* Spatial Panning Slider (L / C / R) */}
+                        <div className="flex items-center gap-3 text-[10px] font-mono text-text-dim">
+                          <span className="text-[9px] font-bold">L</span>
+                          <input
+                            type="range"
+                            min="-1"
+                            max="1"
+                            step="0.05"
+                            value={pan}
+                            onChange={(e) => handlePanChange(sound.id, e.target.value)}
+                            className="w-full h-1 bg-white/10 rounded-lg appearance-none cursor-pointer accent-purple-400"
+                            title="Spatial Stereo Panning"
+                          />
+                          <span className="text-[9px] font-bold">R</span>
+                          <span className="w-7 text-right">
+                            {pan === 0 ? 'C' : pan < 0 ? `${Math.round(Math.abs(pan) * 100)}L` : `${Math.round(pan * 100)}R`}
+                          </span>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -255,7 +324,6 @@ const SoundscapeMixer = ({ isOpen, onClose }) => {
 
           {/* Footer Controls: Master Volume & Sleep Timer */}
           <div className="pt-4 border-t border-white/10 flex flex-col sm:flex-row items-center justify-between gap-4">
-            {/* Master Volume */}
             <div className="flex items-center gap-3 w-full sm:w-auto">
               <button
                 onClick={toggleMute}
@@ -279,7 +347,6 @@ const SoundscapeMixer = ({ isOpen, onClose }) => {
               </span>
             </div>
 
-            {/* Sleep Timer Selector */}
             <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
               <Clock size={16} className="text-text-dim" />
               <span className="text-xs text-text-dim">Timer:</span>

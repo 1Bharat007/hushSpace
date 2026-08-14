@@ -1,15 +1,51 @@
 /**
- * hushSpace — Procedural Ambient Soundscape Engine
+ * hushSpace v0.0.1 — Procedural Soundscape Studio & Spatial Acoustics Engine
  * 
- * Generates natural ambient soundscapes (Brown Noise, Rain, Forest, Ocean Waves, 
- * Campfire, Binaural Alpha Beats) in real-time purely via Web Audio API.
+ * Generates natural ambient soundscapes (Brown Noise, Rain, Ocean Waves, 
+ * Campfire, Forest Sanctuary, Alpha Binaural Beats) in real-time purely via Web Audio API.
  * 
- * Zero external audio assets, zero CDN latency, zero bandwidth consumption.
+ * Features:
+ * - Zero external audio assets, zero CDN latency, zero bandwidth consumption.
+ * - Stereo Spatial Panning on each sound channel for 3D acoustic immersion.
+ * - Anti-pop exponential gain ramping on start, stop, and volume adjustments.
+ * - Sleep timer with smooth exponential fade-out.
+ * - Built-in and user-customizable preset configurations.
  * 
- * @module lib/ambientEngine
+ * @module lib/audio/ambientEngine
  */
 
-class AmbientEngine {
+export const CURATED_PRESETS = [
+  {
+    id: 'deep_focus',
+    name: 'Deep Cognitive Focus',
+    desc: 'Alpha binaural waves layered over soothing brown noise',
+    tracks: { brown: 0.55, binaural: 0.45 },
+    pans: { brown: 0, binaural: 0 },
+  },
+  {
+    id: 'midnight_storm',
+    name: 'Midnight Storm',
+    desc: 'Heavy rain paired with rolling ocean waves',
+    tracks: { rain: 0.65, ocean: 0.45 },
+    pans: { rain: -0.3, ocean: 0.3 },
+  },
+  {
+    id: 'wilderness_solitude',
+    name: 'Wilderness Cabin',
+    desc: 'Warm crackling campfire with gentle forest breeze & chimes',
+    tracks: { campfire: 0.55, forest: 0.45 },
+    pans: { campfire: -0.25, forest: 0.25 },
+  },
+  {
+    id: 'zen_sanctuary',
+    name: 'Zen Sanctuary',
+    desc: 'Forest wind, gentle raindrops, and calming tidal surges',
+    tracks: { forest: 0.4, rain: 0.4, ocean: 0.3 },
+    pans: { forest: -0.4, rain: 0, ocean: 0.4 },
+  },
+];
+
+class AmbientStudioEngine {
   constructor() {
     this.ctx = null;
     this.masterGain = null;
@@ -22,7 +58,7 @@ class AmbientEngine {
   }
 
   /**
-   * Initialize Web Audio context on user gesture.
+   * Initialize or resume Web Audio context on user gesture.
    */
   init() {
     if (this.initialized && this.ctx) {
@@ -45,9 +81,6 @@ class AmbientEngine {
     this.initialized = true;
   }
 
-  /**
-   * Ensure AudioContext is running before performing audio actions.
-   */
   ensureContext() {
     if (!this.initialized || !this.ctx) {
       this.init();
@@ -57,9 +90,8 @@ class AmbientEngine {
     }
   }
 
-  /**
-   * Create a 5-second looping White Noise AudioBuffer.
-   */
+  /* ------------------- NOISE BUFFER FACTORIES ------------------- */
+
   createWhiteNoiseBuffer() {
     const bufferSize = this.ctx.sampleRate * 5;
     const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
@@ -70,9 +102,6 @@ class AmbientEngine {
     return buffer;
   }
 
-  /**
-   * Create a 5-second looping Pink Noise AudioBuffer using Paul Kellet's algorithm.
-   */
   createPinkNoiseBuffer() {
     const bufferSize = this.ctx.sampleRate * 5;
     const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
@@ -92,9 +121,6 @@ class AmbientEngine {
     return buffer;
   }
 
-  /**
-   * Create a 5-second looping Brown (Red) Noise AudioBuffer.
-   */
   createBrownNoiseBuffer() {
     const bufferSize = this.ctx.sampleRate * 5;
     const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
@@ -104,17 +130,23 @@ class AmbientEngine {
       const white = Math.random() * 2 - 1;
       data[i] = (lastOut + 0.02 * white) / 1.02;
       lastOut = data[i];
-      data[i] *= 3.5; // Gain compensation
+      data[i] *= 3.5;
     }
     return buffer;
   }
 
+  createPanner(pan = 0) {
+    if (typeof this.ctx.createStereoPanner === 'function') {
+      const panner = this.ctx.createStereoPanner();
+      panner.pan.setValueAtTime(pan, this.ctx.currentTime);
+      return panner;
+    }
+    return null;
+  }
+
   /* ------------------- TRACK GENERATORS ------------------- */
 
-  /**
-   * 1. Brown Noise Generator
-   */
-  startBrownNoise(gainVal = 0.5) {
+  startBrownNoise(gainVal = 0.5, panVal = 0) {
     this.ensureContext();
     if (this.tracks.brown) this.stopTrack('brown');
 
@@ -127,24 +159,29 @@ class AmbientEngine {
     filter.frequency.setValueAtTime(350, this.ctx.currentTime);
 
     const gain = this.ctx.createGain();
-    gain.gain.setValueAtTime(gainVal, this.ctx.currentTime);
+    gain.gain.setValueAtTime(0.001, this.ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(Math.max(0.001, gainVal), this.ctx.currentTime + 0.2);
+
+    const panner = this.createPanner(panVal);
 
     source.connect(filter);
     filter.connect(gain);
-    gain.connect(this.masterGain);
-    source.start();
 
-    this.tracks.brown = { source, gain, filter, nodes: [source, filter, gain] };
+    if (panner) {
+      gain.connect(panner);
+      panner.connect(this.masterGain);
+    } else {
+      gain.connect(this.masterGain);
+    }
+
+    source.start();
+    this.tracks.brown = { gain, panner, nodes: [source, filter, gain] };
   }
 
-  /**
-   * 2. Rain Generator (Filtered pink noise + highpass droplets)
-   */
-  startRain(gainVal = 0.5) {
+  startRain(gainVal = 0.5, panVal = 0) {
     this.ensureContext();
     if (this.tracks.rain) this.stopTrack('rain');
 
-    // Base rain rumble
     const baseSource = this.ctx.createBufferSource();
     baseSource.buffer = this.createPinkNoiseBuffer();
     baseSource.loop = true;
@@ -153,7 +190,6 @@ class AmbientEngine {
     lowpass.type = 'lowpass';
     lowpass.frequency.setValueAtTime(1000, this.ctx.currentTime);
 
-    // Rain droplet sizzle
     const dropSource = this.ctx.createBufferSource();
     dropSource.buffer = this.createWhiteNoiseBuffer();
     dropSource.loop = true;
@@ -167,7 +203,10 @@ class AmbientEngine {
     dropGain.gain.setValueAtTime(0.3, this.ctx.currentTime);
 
     const trackGain = this.ctx.createGain();
-    trackGain.gain.setValueAtTime(gainVal, this.ctx.currentTime);
+    trackGain.gain.setValueAtTime(0.001, this.ctx.currentTime);
+    trackGain.gain.exponentialRampToValueAtTime(Math.max(0.001, gainVal), this.ctx.currentTime + 0.2);
+
+    const panner = this.createPanner(panVal);
 
     baseSource.connect(lowpass);
     lowpass.connect(trackGain);
@@ -176,21 +215,24 @@ class AmbientEngine {
     bandpass.connect(dropGain);
     dropGain.connect(trackGain);
 
-    trackGain.connect(this.masterGain);
+    if (panner) {
+      trackGain.connect(panner);
+      panner.connect(this.masterGain);
+    } else {
+      trackGain.connect(this.masterGain);
+    }
 
     baseSource.start();
     dropSource.start();
 
     this.tracks.rain = {
       gain: trackGain,
+      panner,
       nodes: [baseSource, lowpass, dropSource, bandpass, dropGain, trackGain]
     };
   }
 
-  /**
-   * 3. Ocean Waves Generator (Filtered noise with rhythmic LFO amplitude modulation)
-   */
-  startOcean(gainVal = 0.5) {
+  startOcean(gainVal = 0.5, panVal = 0) {
     this.ensureContext();
     if (this.tracks.ocean) this.stopTrack('ocean');
 
@@ -202,10 +244,9 @@ class AmbientEngine {
     filter.type = 'lowpass';
     filter.frequency.setValueAtTime(450, this.ctx.currentTime);
 
-    // LFO to modulate wave surge every ~7 seconds
     const lfo = this.ctx.createOscillator();
     lfo.type = 'sine';
-    lfo.frequency.setValueAtTime(0.14, this.ctx.currentTime); // ~7s cycle
+    lfo.frequency.setValueAtTime(0.14, this.ctx.currentTime);
 
     const lfoGain = this.ctx.createGain();
     lfoGain.gain.setValueAtTime(0.4, this.ctx.currentTime);
@@ -214,7 +255,10 @@ class AmbientEngine {
     waveGain.gain.setValueAtTime(0.5, this.ctx.currentTime);
 
     const trackGain = this.ctx.createGain();
-    trackGain.gain.setValueAtTime(gainVal, this.ctx.currentTime);
+    trackGain.gain.setValueAtTime(0.001, this.ctx.currentTime);
+    trackGain.gain.exponentialRampToValueAtTime(Math.max(0.001, gainVal), this.ctx.currentTime + 0.2);
+
+    const panner = this.createPanner(panVal);
 
     lfo.connect(lfoGain);
     lfoGain.connect(waveGain.gain);
@@ -222,25 +266,28 @@ class AmbientEngine {
     source.connect(filter);
     filter.connect(waveGain);
     waveGain.connect(trackGain);
-    trackGain.connect(this.masterGain);
+
+    if (panner) {
+      trackGain.connect(panner);
+      panner.connect(this.masterGain);
+    } else {
+      trackGain.connect(this.masterGain);
+    }
 
     source.start();
     lfo.start();
 
     this.tracks.ocean = {
       gain: trackGain,
+      panner,
       nodes: [source, filter, lfo, lfoGain, waveGain, trackGain]
     };
   }
 
-  /**
-   * 4. Campfire Generator (Warm low rumble + crackle impulses)
-   */
-  startCampfire(gainVal = 0.5) {
+  startCampfire(gainVal = 0.5, panVal = 0) {
     this.ensureContext();
     if (this.tracks.campfire) this.stopTrack('campfire');
 
-    // Warm fire bass rumble
     const rumble = this.ctx.createBufferSource();
     rumble.buffer = this.createBrownNoiseBuffer();
     rumble.loop = true;
@@ -250,16 +297,11 @@ class AmbientEngine {
     rumbleFilter.frequency.setValueAtTime(180, this.ctx.currentTime);
     rumbleFilter.Q.setValueAtTime(1.5, this.ctx.currentTime);
 
-    // Crackle generator (short buffer with sparse sharp spikes)
     const crackleBufferSize = this.ctx.sampleRate * 2;
     const crackleBuffer = this.ctx.createBuffer(1, crackleBufferSize, this.ctx.sampleRate);
     const crackleData = crackleBuffer.getChannelData(0);
     for (let i = 0; i < crackleBufferSize; i++) {
-      if (Math.random() < 0.0006) {
-        crackleData[i] = (Math.random() * 2 - 1) * 0.9;
-      } else {
-        crackleData[i] = 0;
-      }
+      crackleData[i] = Math.random() < 0.0006 ? (Math.random() * 2 - 1) * 0.9 : 0;
     }
 
     const crackleSource = this.ctx.createBufferSource();
@@ -271,7 +313,10 @@ class AmbientEngine {
     crackleFilter.frequency.setValueAtTime(1200, this.ctx.currentTime);
 
     const trackGain = this.ctx.createGain();
-    trackGain.gain.setValueAtTime(gainVal, this.ctx.currentTime);
+    trackGain.gain.setValueAtTime(0.001, this.ctx.currentTime);
+    trackGain.gain.exponentialRampToValueAtTime(Math.max(0.001, gainVal), this.ctx.currentTime + 0.2);
+
+    const panner = this.createPanner(panVal);
 
     rumble.connect(rumbleFilter);
     rumbleFilter.connect(trackGain);
@@ -279,25 +324,27 @@ class AmbientEngine {
     crackleSource.connect(crackleFilter);
     crackleFilter.connect(trackGain);
 
-    trackGain.connect(this.masterGain);
+    if (panner) {
+      trackGain.connect(panner);
+      panner.connect(this.masterGain);
+    } else {
+      trackGain.connect(this.masterGain);
+    }
 
     rumble.start();
     crackleSource.start();
 
     this.tracks.campfire = {
       gain: trackGain,
+      panner,
       nodes: [rumble, rumbleFilter, crackleSource, crackleFilter, trackGain]
     };
   }
 
-  /**
-   * 5. Forest Sanctuary (Gentle wind whisper + periodic subtle bird chime)
-   */
-  startForest(gainVal = 0.5) {
+  startForest(gainVal = 0.5, panVal = 0) {
     this.ensureContext();
     if (this.tracks.forest) this.stopTrack('forest');
 
-    // Wind whisper
     const wind = this.ctx.createBufferSource();
     wind.buffer = this.createPinkNoiseBuffer();
     wind.loop = true;
@@ -308,16 +355,24 @@ class AmbientEngine {
     windFilter.Q.setValueAtTime(1.2, this.ctx.currentTime);
 
     const trackGain = this.ctx.createGain();
-    trackGain.gain.setValueAtTime(gainVal, this.ctx.currentTime);
+    trackGain.gain.setValueAtTime(0.001, this.ctx.currentTime);
+    trackGain.gain.exponentialRampToValueAtTime(Math.max(0.001, gainVal), this.ctx.currentTime + 0.2);
+
+    const panner = this.createPanner(panVal);
 
     wind.connect(windFilter);
     windFilter.connect(trackGain);
-    trackGain.connect(this.masterGain);
+
+    if (panner) {
+      trackGain.connect(panner);
+      panner.connect(this.masterGain);
+    } else {
+      trackGain.connect(this.masterGain);
+    }
 
     wind.start();
 
-    // Subtle singing bowl bell chime scheduled periodically
-    let bellTimer = setInterval(() => {
+    const bellTimer = setInterval(() => {
       if (!this.tracks.forest) {
         clearInterval(bellTimer);
         return;
@@ -326,7 +381,7 @@ class AmbientEngine {
         const bellOsc = this.ctx.createOscillator();
         const bellGain = this.ctx.createGain();
         bellOsc.type = 'sine';
-        bellOsc.frequency.setValueAtTime(880, this.ctx.currentTime); // A5
+        bellOsc.frequency.setValueAtTime(880, this.ctx.currentTime);
 
         bellGain.gain.setValueAtTime(0.06, this.ctx.currentTime);
         bellGain.gain.exponentialRampToValueAtTime(0.0001, this.ctx.currentTime + 3.0);
@@ -336,34 +391,29 @@ class AmbientEngine {
         bellOsc.start();
         bellOsc.stop(this.ctx.currentTime + 3.2);
       } catch {
-        // Context might be closed
+        // Safe catch
       }
     }, 12000);
 
     this.tracks.forest = {
       gain: trackGain,
+      panner,
       interval: bellTimer,
       nodes: [wind, windFilter, trackGain]
     };
   }
 
-  /**
-   * 6. Alpha Binaural Beats (200Hz Left / 210Hz Right -> 10Hz Alpha Focus Wave)
-   * Note: Requires stereo headphones for neurological entrainment effect.
-   */
-  startBinaural(gainVal = 0.4) {
+  startBinaural(gainVal = 0.4, panVal = 0) {
     this.ensureContext();
     if (this.tracks.binaural) this.stopTrack('binaural');
 
-    // Left channel: 200 Hz carrier
     const oscLeft = this.ctx.createOscillator();
     oscLeft.type = 'sine';
     oscLeft.frequency.setValueAtTime(200, this.ctx.currentTime);
 
-    // Right channel: 210 Hz carrier (10 Hz beat difference)
     const oscRight = this.ctx.createOscillator();
     oscRight.type = 'sine';
-    oscRight.frequency.setValueAtTime(210, this.ctx.currentTime);
+    oscRight.frequency.setValueAtTime(210, this.ctx.currentTime); // 10Hz alpha beat difference
 
     const merger = this.ctx.createChannelMerger(2);
 
@@ -373,34 +423,52 @@ class AmbientEngine {
     panRightGain.gain.setValueAtTime(0.5, this.ctx.currentTime);
 
     oscLeft.connect(panLeftGain);
-    panLeftGain.connect(merger, 0, 0); // Left channel
+    panLeftGain.connect(merger, 0, 0);
 
     oscRight.connect(panRightGain);
-    panRightGain.connect(merger, 0, 1); // Right channel
+    panRightGain.connect(merger, 0, 1);
 
     const trackGain = this.ctx.createGain();
-    trackGain.gain.setValueAtTime(gainVal, this.ctx.currentTime);
+    trackGain.gain.setValueAtTime(0.001, this.ctx.currentTime);
+    trackGain.gain.exponentialRampToValueAtTime(Math.max(0.001, gainVal), this.ctx.currentTime + 0.2);
+
+    const panner = this.createPanner(panVal);
 
     merger.connect(trackGain);
-    trackGain.connect(this.masterGain);
+
+    if (panner) {
+      trackGain.connect(panner);
+      panner.connect(this.masterGain);
+    } else {
+      trackGain.connect(this.masterGain);
+    }
 
     oscLeft.start();
     oscRight.start();
 
     this.tracks.binaural = {
       gain: trackGain,
+      panner,
       nodes: [oscLeft, oscRight, panLeftGain, panRightGain, merger, trackGain]
     };
   }
 
-  /* ------------------- TRACK CONTROL ------------------- */
+  /* ------------------- TRACK ADJUSTMENTS ------------------- */
 
   setTrackVolume(trackName, volume) {
     if (this.tracks[trackName]?.gain && this.ctx) {
+      const v = Math.max(0.0001, Math.min(1, volume));
       this.tracks[trackName].gain.gain.setValueAtTime(
-        Math.max(0, Math.min(1, volume)),
+        v,
         this.ctx.currentTime
       );
+    }
+  }
+
+  setTrackPan(trackName, pan) {
+    if (this.tracks[trackName]?.panner && this.ctx) {
+      const p = Math.max(-1, Math.min(1, pan));
+      this.tracks[trackName].panner.pan.setValueAtTime(p, this.ctx.currentTime);
     }
   }
 
@@ -417,22 +485,29 @@ class AmbientEngine {
     const track = this.tracks[trackName];
     if (!track) return;
 
-    if (track.interval) {
-      clearInterval(track.interval);
+    if (track.interval) clearInterval(track.interval);
+
+    if (track.gain && this.ctx) {
+      try {
+        track.gain.gain.exponentialRampToValueAtTime(0.0001, this.ctx.currentTime + 0.15);
+      } catch {
+        // Safe catch
+      }
     }
 
-    if (track.nodes) {
-      track.nodes.forEach((node) => {
-        try {
-          if (typeof node.stop === 'function') node.stop();
-          if (typeof node.disconnect === 'function') node.disconnect();
-        } catch {
-          // Node already stopped or disconnected
-        }
-      });
-    }
-
-    delete this.tracks[trackName];
+    setTimeout(() => {
+      if (track.nodes) {
+        track.nodes.forEach((node) => {
+          try {
+            if (typeof node.stop === 'function') node.stop();
+            if (typeof node.disconnect === 'function') node.disconnect();
+          } catch {
+            // Already stopped
+          }
+        });
+      }
+      delete this.tracks[trackName];
+    }, 160);
   }
 
   stopAll() {
@@ -470,7 +545,7 @@ class AmbientEngine {
     }
   }
 
-  fadeOutAndStop(durationSeconds = 3) {
+  fadeOutAndStop(durationSeconds = 4) {
     if (!this.masterGain || !this.ctx) {
       this.stopAll();
       return;
@@ -490,6 +565,5 @@ class AmbientEngine {
   }
 }
 
-// Export singleton instance
-export const ambientEngine = new AmbientEngine();
+export const ambientEngine = new AmbientStudioEngine();
 export default ambientEngine;
