@@ -2,6 +2,8 @@ import React from "react";
 import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { CryptoProvider } from "./context/CryptoContext";
+import { ToastProvider } from "./context/ToastContext";
+import ErrorBoundary from "./components/common/ErrorBoundary";
 import Layout from "./components/Layout";
 import AuthModal from "./components/AuthModal";
 import PassphraseModal from "./components/PassphraseModal";
@@ -23,7 +25,6 @@ const ProtectedRoute = ({ children }) => {
     </div>
   );
   
-  // Redirect logged-out user to landing page without history stack push
   if (!user) return <Navigate to="/" replace />;
   
   return <Layout>{children}</Layout>;
@@ -78,15 +79,18 @@ function AppContent() {
 
 function App() {
   return (
-    <AuthProvider>
-      <CryptoProvider>
-        <Router>
-          <AppContent />
-        </Router>
-      </CryptoProvider>
-    </AuthProvider>
+    <ErrorBoundary>
+      <AuthProvider>
+        <CryptoProvider>
+          <ToastProvider>
+            <Router>
+              <AppContent />
+            </Router>
+          </ToastProvider>
+        </CryptoProvider>
+      </AuthProvider>
+    </ErrorBoundary>
   );
 }
 
 export default App;
-
