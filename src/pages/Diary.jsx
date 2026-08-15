@@ -23,6 +23,7 @@ import {
   enqueueOfflineMutation
 } from "../lib/storage/indexedDb";
 import ZenEditor from "../components/editor/ZenEditor";
+import PromptModal from "../components/cbt/PromptModal";
 import { 
   Plus, 
   Search, 
@@ -35,9 +36,9 @@ import {
   Sparkles, 
   Tag, 
   Smile, 
-  Wifi,
-  WifiOff,
-  Lightbulb
+  Wifi, 
+  WifiOff, 
+  Brain 
 } from "lucide-react";
 import { useParams, useNavigate } from "react-router-dom";
 
@@ -47,14 +48,6 @@ const MOODS = [
   { id: 'neutral', emoji: '😐', label: 'Calm', color: 'text-blue-400 bg-blue-500/10 border-blue-500/30' },
   { id: 'good', emoji: '🙂', label: 'Clear', color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30' },
   { id: 'peaceful', emoji: '😊', label: 'Serene', color: 'text-purple-400 bg-purple-500/10 border-purple-500/30' },
-];
-
-const REFLECTION_PROMPTS = [
-  { category: 'Gratitude', prompt: 'What are 3 small, ordinary moments that brought you quiet peace today?' },
-  { category: 'CBT Reframe', prompt: 'What specific worry is lingering in your mind? What is a rational, kind counter-perspective?' },
-  { category: 'Evening Unwind', prompt: 'What went well today? What can you forgive yourself for and release into the night?' },
-  { category: 'Morning Intention', prompt: 'What mindset or gentle boundary will best protect your energy today?' },
-  { category: 'Brain Dump', prompt: 'Unload whatever raw thoughts are cluttering your mind without editing or judging.' },
 ];
 
 const Diary = () => {
@@ -76,7 +69,7 @@ const Diary = () => {
   const [errorMsg, setErrorMsg] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [isSidebarOpenMobile, setIsSidebarOpenMobile] = useState(false);
-  const [showPromptPicker, setShowPromptPicker] = useState(false);
+  const [isPromptModalOpen, setIsPromptModalOpen] = useState(false);
   
   const saveTimeoutRef = useRef(null);
   const activeEntryRef = useRef(null);
@@ -384,12 +377,9 @@ const Diary = () => {
     setTags(tags.filter(t => t !== tagToRemove));
   };
 
-  const applyPrompt = (promptText) => {
-    const formatted = content 
-      ? `${content}\n\n### ${promptText}\n` 
-      : `### ${promptText}\n\n`;
+  const applyProtocolTemplate = (template) => {
+    const formatted = content ? `${content}\n\n${template}` : template;
     setContent(formatted);
-    setShowPromptPicker(false);
   };
 
   const filteredEntries = entries.filter(
@@ -572,7 +562,7 @@ const Diary = () => {
               </div>
             </div>
 
-            {/* Toolbar: Mood Selector + Prompt Picker Button + Tags */}
+            {/* Toolbar: Mood Selector + CBT Protocol Button + Tags */}
             <div className="flex flex-wrap items-center justify-between gap-3 pb-3 mb-2 border-b border-white/5">
               {/* Mood Selector */}
               <div className="flex items-center gap-1.5">
@@ -597,46 +587,14 @@ const Diary = () => {
                 ))}
               </div>
 
-              {/* Prompt Engine Button */}
-              <div className="relative">
-                <button
-                  onClick={() => setShowPromptPicker(!showPromptPicker)}
-                  className="flex items-center gap-1.5 text-xs font-bold text-brand-accent bg-brand-accent/10 hover:bg-brand-accent/20 px-3 py-1.5 rounded-xl transition-all border border-brand-accent/30"
-                >
-                  <Lightbulb size={14} />
-                  <span>CBT Prompts</span>
-                </button>
-
-                {showPromptPicker && (
-                  <div className="absolute right-0 top-10 z-30 w-80 sm:w-96 glass-card p-4 rounded-2xl shadow-2xl ring-1 ring-white/10 border border-white/10 space-y-2">
-                    <div className="flex items-center justify-between pb-2 border-b border-white/10">
-                      <span className="text-xs font-bold text-white flex items-center gap-1.5">
-                        <Sparkles size={14} className="text-brand-accent" />
-                        Guided Prompts
-                      </span>
-                      <button onClick={() => setShowPromptPicker(false)} className="text-text-dim hover:text-white">
-                        ✕
-                      </button>
-                    </div>
-                    <div className="space-y-2 max-h-64 overflow-y-auto">
-                      {REFLECTION_PROMPTS.map((p, idx) => (
-                        <button
-                          key={idx}
-                          onClick={() => applyPrompt(p.prompt)}
-                          className="w-full text-left p-2.5 rounded-xl bg-white/[0.02] hover:bg-brand-accent/10 border border-white/5 hover:border-brand-accent/30 transition-all text-xs group"
-                        >
-                          <div className="font-bold text-brand-accent text-[10px] uppercase tracking-wider mb-1">
-                            {p.category}
-                          </div>
-                          <div className="text-text-dim group-hover:text-white leading-relaxed">
-                            {p.prompt}
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
+              {/* CBT Reflection Protocols Button */}
+              <button
+                onClick={() => setIsPromptModalOpen(true)}
+                className="flex items-center gap-1.5 text-xs font-bold text-brand-accent bg-brand-accent/10 hover:bg-brand-accent/20 px-3.5 py-1.5 rounded-xl transition-all border border-brand-accent/30 shadow-sm"
+              >
+                <Brain size={14} />
+                <span>CBT Protocols</span>
+              </button>
             </div>
 
             {/* Tags Ribbon */}
@@ -667,7 +625,7 @@ const Diary = () => {
             <ZenEditor
               content={content}
               onChange={setContent}
-              placeholder="Write your unfiltered thoughts freely. Everything is encrypted before leaving your browser and cached offline in IndexedDB..."
+              placeholder="Write your thoughts freely or choose a guided CBT reflection protocol above..."
             />
           </>
         ) : (
@@ -686,6 +644,13 @@ const Diary = () => {
           </div>
         )}
       </div>
+
+      {/* CBT Protocol Picker Modal */}
+      <PromptModal
+        isOpen={isPromptModalOpen}
+        onClose={() => setIsPromptModalOpen(false)}
+        onSelectProtocol={applyProtocolTemplate}
+      />
     </div>
   );
 };
