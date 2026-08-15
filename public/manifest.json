@@ -1,0 +1,25 @@
+{
+  "name": "hushSpace — Zero-Knowledge Encrypted Sanctuary",
+  "short_name": "hushSpace",
+  "description": "An open-source, zero-knowledge encrypted personal sanctuary combining client-side AES-GCM-256 journaling, procedural ambient soundscapes, emotional analytics, and panic shield privacy.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0F172A",
+  "theme_color": "#0F172A",
+  "orientation": "any",
+  "categories": ["lifestyle", "productivity", "health"],
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect width='192' height='192' rx='40' fill='%230F172A'/><text x='50%25' y='60%25' dominant-baseline='middle' text-anchor='middle' font-size='100'>🌿</text></svg>",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='100' fill='%230F172A'/><text x='50%25' y='60%25' dominant-baseline='middle' text-anchor='middle' font-size='280'>🌿</text></svg>",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
