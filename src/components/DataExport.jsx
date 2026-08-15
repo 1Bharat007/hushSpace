@@ -1,10 +1,24 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Download, FileText, Trash2, ShieldAlert, X, Check, AlertTriangle, Database } from 'lucide-react';
+import { 
+  Download, 
+  FileText, 
+  Trash2, 
+  ShieldAlert, 
+  X, 
+  Check, 
+  AlertTriangle, 
+  Database,
+  Lock,
+  Sparkles
+} from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useCrypto } from '../context/CryptoContext';
-import { db, storage } from '../firebase/config';
-import { collection, query, where, getDocs, deleteDoc, doc } from 'firebase/firestore';
+import { 
+  generateEncryptedJSONBackup, 
+  generateObsidianMarkdownVault, 
+  executeIrreversibleAccountPurge 
+} from '../lib/export/dataExporter';
 
 const DataExport = ({ isOpen, onClose }) => {
   const { user, logout } = useAuth();
@@ -27,142 +41,88 @@ const DataExport = ({ isOpen, onClose }) => {
     if (!user) return;
     setExportingJson(true);
     setErrorMsg('');
+    setSuccessMsg('');
+
     try {
-      // Fetch all user collections
-      const entriesSnap = await getDocs(query(collection(db, 'entries'), where('userId', '==', user.uid)));
-      const audioSnap = await getDocs(query(collection(db, 'audio'), where('userId', '==', user.uid)));
-      const gallerySnap = await getDocs(query(collection(db, 'gallery'), where('userId', '==', user.uid)));
-
-      const backup = {
-        version: '2.0.0',
-        exportedAt: new Date().toISOString(),
-        userId: user.uid,
-        entries: entriesSnap.docs.map(d => ({ id: d.id, ...d.data() })),
-        audio: audioSnap.docs.map(d => ({ id: d.id, ...d.data() })),
-        gallery: gallerySnap.docs.map(d => ({ id: d.id, ...d.data() })),
-      };
-
-      const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+      const blob = await generateEncryptedJSONBackup(user.uid);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
       a.download = `hushSpace-encrypted-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
       a.click();
+      document.body.removeChild(a);
       URL.revokeObjectURL(url);
 
-      setSuccessMsg('Encrypted backup successfully exported.');
+      setSuccessMsg('Encrypted JSON backup downloaded.');
     } catch (err) {
       console.error('Export failed:', err);
-      setErrorMsg('Failed to export encrypted backup.');
+      setErrorMsg('Failed to generate encrypted backup.');
     } finally {
       setExportingJson(false);
     }
   };
 
   /**
-   * Export decrypted Markdown journal.
+   * Export Obsidian/Notion Markdown Notebook.
    */
   const handleExportDecryptedMarkdown = async () => {
-    if (!user || isLocked) {
+    if (!user) return;
+    if (isLocked) {
       setErrorMsg('Please unlock your encryption vault first.');
       return;
     }
+
     setExportingMd(true);
     setErrorMsg('');
+    setSuccessMsg('');
 
     try {
-      const entriesSnap = await getDocs(query(collection(db, 'entries'), where('userId', '==', user.uid)));
-      
-      let markdownContent = `# hushSpace Personal Journal Export\n`;
-      markdownContent += `Exported on: ${new Date().toLocaleString()}\n\n---\n\n`;
-
-      for (const docSnap of entriesSnap.docs) {
-        const data = docSnap.data();
-        let decryptedTitle = data.title || 'Untitled Entry';
-        let decryptedContent = data.content || '';
-
-        // If entry is encrypted
-        if (data.isEncrypted && data.ciphertext) {
-          decryptedContent = await decryptText(data.ciphertext, data.iv);
-          if (data.titleCiphertext) {
-            decryptedTitle = await decryptText(data.titleCiphertext, data.titleIv);
-          }
-        }
-
-        const dateStr = data.createdAt?.toDate ? data.createdAt.toDate().toLocaleDateString() : 'Unknown Date';
-        const moodEmoji = data.mood || '';
-
-        markdownContent += `## ${decryptedTitle} ${moodEmoji}\n`;
-        markdownContent += `*Date: ${dateStr}*\n\n`;
-        if (data.tags && data.tags.length > 0) {
-          markdownContent += `*Tags: ${data.tags.map(t => `#${t}`).join(' ')}*\n\n`;
-        }
-        markdownContent += `${decryptedContent}\n\n---\n\n`;
-      }
-
-      const blob = new Blob([markdownContent], { type: 'text/markdown;charset=utf-8' });
+      const blob = await generateObsidianMarkdownVault(user.uid, decryptText);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `hushSpace-journal-${new Date().toISOString().slice(0, 10)}.md`;
+      a.download = `hushSpace-obsidian-vault-${new Date().toISOString().slice(0, 10)}.md`;
+      document.body.appendChild(a);
       a.click();
+      document.body.removeChild(a);
       URL.revokeObjectURL(url);
 
-      setSuccessMsg('Decrypted Markdown journal exported.');
+      setSuccessMsg('Obsidian & Notion markdown notebook downloaded.');
     } catch (err) {
       console.error('Markdown export failed:', err);
-      setErrorMsg('Failed to export decrypted markdown.');
+      setErrorMsg('Failed to export markdown notebook.');
     } finally {
       setExportingMd(false);
     }
   };
 
   /**
-   * Complete account and data wipe (Data Sovereignty).
+   * Complete Irreversible Account Purge.
    */
-  const handleWipeAccount = async () => {
-    if (wipeInput !== 'DELETE ALL MY DATA') {
-      setErrorMsg('Please type the exact phrase to confirm deletion.');
+  const handleAccountPurge = async () => {
+    if (wipeInput !== 'DELETE MY DATA') {
+      setErrorMsg('Please type "DELETE MY DATA" exactly to confirm.');
       return;
     }
 
     setWiping(true);
     setErrorMsg('');
+
     try {
-      // 1. Delete all entries
-      const entriesSnap = await getDocs(query(collection(db, 'entries'), where('userId', '==', user.uid)));
-      for (const d of entriesSnap.docs) {
-        await deleteDoc(doc(db, 'entries', d.id));
-      }
-
-      // 2. Delete audio metadata
-      const audioSnap = await getDocs(query(collection(db, 'audio'), where('userId', '==', user.uid)));
-      for (const d of audioSnap.docs) {
-        await deleteDoc(doc(db, 'audio', d.id));
-      }
-
-      // 3. Delete gallery metadata
-      const gallerySnap = await getDocs(query(collection(db, 'gallery'), where('userId', '==', user.uid)));
-      for (const d of gallerySnap.docs) {
-        await deleteDoc(doc(db, 'gallery', d.id));
-      }
-
-      // 4. Delete user encryption metadata
-      await deleteDoc(doc(db, 'users', user.uid));
-
-      // 5. Sign out
+      await executeIrreversibleAccountPurge(user);
       await logout();
-      onClose();
+      window.location.href = '/';
     } catch (err) {
-      console.error('Data wipe failed:', err);
-      setErrorMsg('Failed to wipe data completely.');
+      console.error('Purge error:', err);
+      setErrorMsg('Failed to complete purge. Please try again.');
       setWiping(false);
     }
   };
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-[160] flex items-center justify-center p-4">
+      <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 sm:p-6">
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -175,134 +135,154 @@ const DataExport = ({ isOpen, onClose }) => {
           initial={{ opacity: 0, scale: 0.95, y: 20 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95, y: 20 }}
-          className="relative w-full max-w-lg glass-card p-6 sm:p-8 rounded-3xl shadow-2xl ring-1 ring-white/10"
+          className="relative w-full max-w-2xl glass-card p-6 sm:p-8 rounded-3xl shadow-2xl ring-1 ring-white/10 max-h-[90vh] flex flex-col overflow-hidden"
         >
-          <div className="flex items-center justify-between pb-4 border-b border-white/10 mb-6">
+          {/* Header */}
+          <div className="flex items-center justify-between pb-4 border-b border-white/10">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-purple-500/10 flex items-center justify-center text-purple-400">
+              <div className="w-10 h-10 rounded-xl bg-brand-accent/10 flex items-center justify-center text-brand-accent">
                 <Database size={20} />
               </div>
               <div>
-                <h2 className="text-xl font-bold text-white">Data Sovereignty</h2>
-                <p className="text-xs text-text-dim">You own 100% of your data. Export or erase anytime.</p>
+                <h2 className="text-xl font-bold text-white">Data Sovereignty & Account Privacy</h2>
+                <p className="text-xs text-text-dim">
+                  Your data belongs to you alone. Export anytime, zero lock-in, zero residue.
+                </p>
               </div>
             </div>
+
             <button onClick={onClose} className="p-2 text-text-dim hover:text-white transition-colors">
               <X size={20} />
             </button>
           </div>
 
-          {successMsg && (
-            <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 p-3 rounded-xl text-xs font-medium mb-4">
-              <Check size={16} className="shrink-0 text-emerald-400" />
-              <span>{successMsg}</span>
-            </div>
-          )}
-
-          {errorMsg && (
-            <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/20 text-red-300 p-3 rounded-xl text-xs font-medium mb-4">
-              <AlertTriangle size={16} className="shrink-0 text-red-400" />
-              <span>{errorMsg}</span>
-            </div>
-          )}
-
-          <div className="space-y-4">
-            {/* Option 1: Encrypted JSON Backup */}
-            <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 flex items-center justify-between gap-4">
-              <div>
-                <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                  <Download size={16} className="text-brand-accent" />
-                  Encrypted JSON Backup
-                </h4>
-                <p className="text-xs text-text-dim mt-0.5">
-                  Full raw snapshot for offline preservation and future restore.
-                </p>
+          {/* Body Content */}
+          <div className="flex-1 overflow-y-auto py-5 space-y-6 pr-1">
+            {/* Feedback Alerts */}
+            {successMsg && (
+              <div className="flex items-center gap-2 text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-4 py-3 rounded-2xl text-xs font-bold">
+                <Check size={16} />
+                <span>{successMsg}</span>
               </div>
-              <button
-                onClick={handleExportEncryptedJson}
-                disabled={exportingJson}
-                className="bg-brand-accent hover:bg-brand-accent-hover text-white text-xs font-bold px-4 py-2.5 rounded-xl transition-all shadow-md shadow-brand-accent/20 shrink-0 disabled:opacity-50"
-              >
-                {exportingJson ? 'Exporting...' : 'Export JSON'}
-              </button>
-            </div>
+            )}
 
-            {/* Option 2: Decrypted Markdown */}
-            <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 flex items-center justify-between gap-4">
-              <div>
-                <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                  <FileText size={16} className="text-purple-400" />
-                  Markdown Diary (.md)
-                </h4>
-                <p className="text-xs text-text-dim mt-0.5">
-                  Readable plaintext journal format. Compatible with Obsidian & Notion.
-                </p>
+            {errorMsg && (
+              <div className="flex items-center gap-2 text-red-400 bg-red-500/10 border border-red-500/20 px-4 py-3 rounded-2xl text-xs font-bold">
+                <AlertTriangle size={16} />
+                <span>{errorMsg}</span>
               </div>
-              <button
-                onClick={handleExportDecryptedMarkdown}
-                disabled={exportingMd || isLocked}
-                className="bg-purple-500 hover:bg-purple-600 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition-all shadow-md shadow-purple-500/20 shrink-0 disabled:opacity-50"
-              >
-                {exportingMd ? 'Exporting...' : 'Export .md'}
-              </button>
+            )}
+
+            {/* Export Section */}
+            <div className="space-y-4">
+              <h3 className="text-xs font-bold text-text-dim uppercase tracking-wider font-mono">
+                1. Portable Vault Exports
+              </h3>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Encrypted JSON Dump */}
+                <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 flex flex-col justify-between space-y-3">
+                  <div>
+                    <div className="flex items-center gap-2 text-brand-accent font-bold text-sm mb-1">
+                      <Download size={16} />
+                      <span>Encrypted JSON Backup</span>
+                    </div>
+                    <p className="text-xs text-text-dim leading-relaxed">
+                      Complete machine-readable JSON backup containing all reflections, audio metadata, and photo links.
+                    </p>
+                  </div>
+
+                  <button
+                    onClick={handleExportEncryptedJson}
+                    disabled={exportingJson}
+                    className="w-full bg-white/5 hover:bg-white/10 text-white font-bold py-2.5 rounded-xl border border-white/5 transition-all text-xs flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    {exportingJson ? (
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    ) : (
+                      <>
+                        <Download size={14} />
+                        <span>Download JSON</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {/* Obsidian / Notion Markdown Notebook */}
+                <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 flex flex-col justify-between space-y-3">
+                  <div>
+                    <div className="flex items-center gap-2 text-purple-400 font-bold text-sm mb-1">
+                      <FileText size={16} />
+                      <span>Obsidian / Notion Markdown</span>
+                    </div>
+                    <p className="text-xs text-text-dim leading-relaxed">
+                      Human-readable Markdown notebook with structured YAML frontmatter for seamless import into Obsidian or Notion.
+                    </p>
+                  </div>
+
+                  <button
+                    onClick={handleExportDecryptedMarkdown}
+                    disabled={exportingMd || isLocked}
+                    className="w-full bg-purple-500/10 hover:bg-purple-500/20 text-purple-300 font-bold py-2.5 rounded-xl border border-purple-500/30 transition-all text-xs flex items-center justify-center gap-2 disabled:opacity-40"
+                  >
+                    {exportingMd ? (
+                      <div className="w-4 h-4 border-2 border-purple-300/30 border-t-purple-300 rounded-full animate-spin" />
+                    ) : (
+                      <>
+                        <FileText size={14} />
+                        <span>{isLocked ? "Unlock Vault to Export" : "Download Markdown"}</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
             </div>
 
-            {/* Option 3: Account / Data Wipe */}
-            <div className="p-4 rounded-2xl bg-red-500/[0.03] border border-red-500/20">
-              <div className="flex items-center justify-between gap-4 mb-2">
-                <h4 className="text-sm font-bold text-red-400 flex items-center gap-2">
-                  <ShieldAlert size={16} />
-                  Purge & Wipe Sanctuary
-                </h4>
-                {!showWipeConfirm && (
+            {/* Self-Destruct / Account Purge Section */}
+            <div className="pt-4 border-t border-white/10 space-y-4">
+              <h3 className="text-xs font-bold text-red-400 uppercase tracking-wider font-mono flex items-center gap-1.5">
+                <ShieldAlert size={14} />
+                <span>2. Irreversible Cloud & Local Purge</span>
+              </h3>
+
+              <div className="p-5 rounded-2xl bg-red-500/5 border border-red-500/20 space-y-4">
+                <p className="text-xs text-red-300 leading-relaxed">
+                  Permanently deletes all encrypted diary reflections, audio memos, photo vault files, IndexedDB caches, and encryption keys. This operation cannot be undone.
+                </p>
+
+                {!showWipeConfirm ? (
                   <button
                     onClick={() => setShowWipeConfirm(true)}
-                    className="text-xs font-bold text-red-400 hover:text-red-300 bg-red-500/10 px-4 py-2 rounded-xl transition-colors"
+                    className="bg-red-500/10 hover:bg-red-500/20 text-red-400 font-bold px-4 py-2.5 rounded-xl border border-red-500/30 transition-all text-xs flex items-center gap-2"
                   >
-                    Wipe Data
+                    <Trash2 size={14} />
+                    <span>Initiate Account Self-Destruct</span>
                   </button>
+                ) : (
+                  <div className="space-y-3 pt-2">
+                    <p className="text-xs font-mono text-text-dim">
+                      Type <strong className="text-red-400">DELETE MY DATA</strong> below to confirm irreversible deletion:
+                    </p>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={wipeInput}
+                        onChange={(e) => setWipeInput(e.target.value)}
+                        placeholder="DELETE MY DATA"
+                        className="flex-1 bg-black/40 border border-red-500/30 rounded-xl px-3 py-2 text-xs text-white placeholder:text-white/20 font-mono outline-none focus:border-red-500"
+                        autoFocus
+                      />
+                      <button
+                        onClick={handleAccountPurge}
+                        disabled={wipeInput !== 'DELETE MY DATA' || wiping}
+                        className="bg-red-600 hover:bg-red-700 text-white font-bold px-4 py-2 rounded-xl text-xs transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 shadow-lg shadow-red-600/20"
+                      >
+                        {wiping ? 'Purging...' : 'Confirm Purge'}
+                      </button>
+                    </div>
+                  </div>
                 )}
               </div>
-              <p className="text-xs text-text-dim">
-                Permanently deletes all entries, gallery metadata, audio files, and encryption keys from Cloud servers.
-              </p>
-
-              {showWipeConfirm && (
-                <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  className="mt-4 pt-4 border-t border-red-500/20 space-y-3"
-                >
-                  <p className="text-xs text-red-300">
-                    Type <strong className="text-white font-mono">DELETE ALL MY DATA</strong> below to confirm:
-                  </p>
-                  <input
-                    type="text"
-                    value={wipeInput}
-                    onChange={(e) => setWipeInput(e.target.value)}
-                    placeholder="DELETE ALL MY DATA"
-                    className="w-full bg-black/40 border border-red-500/30 rounded-xl p-2.5 text-xs text-white placeholder:text-white/20 font-mono outline-none focus:border-red-500"
-                  />
-                  <div className="flex gap-2">
-                    <button
-                      onClick={handleWipeAccount}
-                      disabled={wiping || wipeInput !== 'DELETE ALL MY DATA'}
-                      className="flex-1 bg-red-600 hover:bg-red-700 text-white text-xs font-bold py-2.5 rounded-xl transition-colors disabled:opacity-40"
-                    >
-                      {wiping ? 'Purging...' : 'Permanently Delete Everything'}
-                    </button>
-                    <button
-                      onClick={() => {
-                        setShowWipeConfirm(false);
-                        setWipeInput('');
-                      }}
-                      className="px-4 bg-white/5 hover:bg-white/10 text-xs text-text-dim hover:text-white font-bold rounded-xl transition-colors"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </motion.div>
-              )}
             </div>
           </div>
         </motion.div>
