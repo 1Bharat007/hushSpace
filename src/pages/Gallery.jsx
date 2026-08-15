@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useAuth } from "../context/AuthContext";
 import { db, storage } from "../firebase/config";
 import { 
@@ -8,23 +8,42 @@ import {
   where, 
   orderBy, 
   onSnapshot, 
-  serverTimestamp,
-  deleteDoc,
-  doc
+  serverTimestamp, 
+  deleteDoc, 
+  doc 
 } from "firebase/firestore";
 import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from "firebase/storage";
 import { motion, AnimatePresence } from "framer-motion";
-import { Image as ImageIcon, Upload, Trash2, Camera, AlertCircle } from "lucide-react";
+import { 
+  Image as ImageIcon, 
+  Upload, 
+  Trash2, 
+  Camera, 
+  AlertCircle, 
+  ShieldCheck, 
+  Eye, 
+  Sparkles, 
+  Maximize2 
+} from "lucide-react";
+import { sanitizeAndCompressImage, formatBytes } from "../lib/media/sanitizer";
+import PhotoLightbox from "../components/media/PhotoLightbox";
 
-const MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024; // 10MB Limit
+const MAX_IMAGE_SIZE_BYTES = 15 * 1024 * 1024; // 15MB Raw Limit
 
 const Gallery = () => {
   const { user } = useAuth();
   const [images, setImages] = useState([]);
   const [uploading, setUploading] = useState(false);
+  const [sanitizing, setSanitizing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
+  const [captionInput, setCaptionInput] = useState("");
+  const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(null);
+  const [isLightboxOpen, setIsLightboxOpen] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
+
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
     if (!user) return;
@@ -42,8 +61,8 @@ const Gallery = () => {
         setLoading(false);
       },
       (err) => {
-        console.error("Firestore snapshot error:", err);
-        setErrorMsg("Failed to sync gallery memories.");
+        console.error("Firestore gallery snapshot error:", err);
+        setErrorMsg("Failed to sync photo memories.");
         setLoading(false);
       }
     );
@@ -51,196 +70,273 @@ const Gallery = () => {
     return unsubscribe;
   }, [user]);
 
-  const handleUpload = async (e) => {
+  /**
+   * Process and upload file with client-side EXIF/GPS stripping.
+   */
+  const processAndUploadFile = async (rawFile) => {
+    if (!rawFile || !user) return;
     setErrorMsg("");
-    const file = e.target.files[0];
-    if (!file) return;
 
-    // Client-side file type and file size validation (Abuse Protection)
-    if (!file.type.startsWith("image/")) {
-      setErrorMsg("Please select a valid image file (JPEG, PNG, WebP, GIF).");
+    if (!rawFile.type.startsWith("image/")) {
+      setErrorMsg("Please select an image file (JPEG, PNG, WebP, HEIC).");
       return;
     }
 
-    if (file.size > MAX_IMAGE_SIZE_BYTES) {
-      setErrorMsg("File size exceeds 10MB limit. Please select a smaller photo.");
+    if (rawFile.size > MAX_IMAGE_SIZE_BYTES) {
+      setErrorMsg("Image exceeds 15MB limit.");
       return;
     }
 
-    setUploading(true);
-    const storageRef = ref(storage, `gallery/${user.uid}/${Date.now()}_${file.name}`);
-    const uploadTask = uploadBytesResumable(storageRef, file);
+    try {
+      setSanitizing(true);
+      // Client-Side Canvas Stripping + WebP compression
+      const sanitized = await sanitizeAndCompressImage(rawFile);
+      setSanitizing(false);
+      setUploading(true);
 
-    uploadTask.on(
-      "state_changed",
-      (snapshot) => {
-        const prog = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-        setProgress(prog);
-      },
-      (error) => {
-        console.error("Upload failed", error);
-        setErrorMsg("Image upload failed. Please check your internet connection.");
-        setUploading(false);
-        setProgress(0);
-      },
-      async () => {
-        try {
-          const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
-          await addDoc(collection(db, "gallery"), {
-            userId: user.uid,
-            url: downloadURL,
-            fileName: file.name,
-            storagePath: storageRef.fullPath,
-            createdAt: serverTimestamp(),
-          });
-        } catch (err) {
-          console.error("Error saving gallery metadata:", err);
-          setErrorMsg("Upload complete, but failed to save photo details.");
-        } finally {
+      const fileName = `sanitized_${Date.now()}.webp`;
+      const storagePath = `users/${user.uid}/photos/${fileName}`;
+      const storageRef = ref(storage, storagePath);
+
+      const uploadTask = uploadBytesResumable(storageRef, sanitized.blob, {
+        contentType: 'image/webp',
+      });
+
+      uploadTask.on(
+        "state_changed",
+        (snapshot) => {
+          const prog = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100);
+          setProgress(prog);
+        },
+        (error) => {
+          console.error("Upload error:", error);
+          setErrorMsg("Photo upload failed. Please verify connection.");
           setUploading(false);
           setProgress(0);
+        },
+        async () => {
+          try {
+            const downloadUrl = await getDownloadURL(uploadTask.snapshot.ref);
+            await addDoc(collection(db, "gallery"), {
+              userId: user.uid,
+              url: downloadUrl,
+              storagePath,
+              caption: captionInput.trim() || rawFile.name.replace(/\.[^/.]+$/, ""),
+              width: sanitized.width,
+              height: sanitized.height,
+              originalSize: sanitized.originalSize,
+              sanitizedSize: sanitized.newSize,
+              isSanitized: true,
+              createdAt: serverTimestamp(),
+            });
+            setCaptionInput("");
+          } catch (err) {
+            console.error("Failed to store photo record:", err);
+            setErrorMsg("Photo uploaded, but database entry could not be saved.");
+          } finally {
+            setUploading(false);
+            setProgress(0);
+          }
         }
-      }
-    );
+      );
+    } catch (err) {
+      console.error("Sanitization error:", err);
+      setErrorMsg("Could not sanitize image on client.");
+      setSanitizing(false);
+      setUploading(false);
+    }
   };
 
-  const handleDelete = async (image) => {
-    if (!window.confirm("Delete this memory?")) return;
+  const handleFileInput = (e) => {
+    const file = e.target.files?.[0];
+    if (file) processAndUploadFile(file);
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) processAndUploadFile(file);
+  };
+
+  const handleDelete = async (photo, e) => {
+    e.stopPropagation();
+    if (!window.confirm("Permanently delete this photo memory?")) return;
     setErrorMsg("");
 
     try {
-      const storageRef = ref(storage, image.storagePath);
-      await deleteObject(storageRef);
-      await deleteDoc(doc(db, "gallery", image.id));
-    } catch (error) {
-      console.error("Delete failed", error);
-      try {
-        await deleteDoc(doc(db, "gallery", image.id));
-      } catch (err) {
-        setErrorMsg("Failed to delete memory. Please try again.");
+      if (photo.storagePath) {
+        const storageRef = ref(storage, photo.storagePath);
+        await deleteObject(storageRef).catch((err) => console.warn("Storage delete warn:", err));
       }
+      await deleteDoc(doc(db, "gallery", photo.id));
+    } catch (err) {
+      console.error("Delete photo error:", err);
+      setErrorMsg("Failed to delete photo.");
     }
   };
 
+  const openLightbox = (index) => {
+    setSelectedPhotoIndex(index);
+    setIsLightboxOpen(true);
+  };
+
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 max-w-6xl mx-auto">
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-3xl sm:text-4xl font-bold text-white mb-2 flex items-center gap-3">
-            <Camera className="text-brand-accent" size={32} />
-            Your Gallery
+            <Camera className="text-emerald-400" size={32} />
+            Photo Memory Sanctuary
           </h1>
           <p className="text-text-dim text-sm sm:text-base">
-            A private collection of your favorite moments.
+            EXIF & GPS stripped client-side before upload. Zero location tracking, zero metadata footprint.
           </p>
         </div>
 
-        <label className="relative cursor-pointer group w-full sm:w-auto">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading || sanitizing}
+            className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-white px-5 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition-all shadow-lg shadow-emerald-500/20 disabled:opacity-50"
+          >
+            <Upload size={16} />
+            <span>
+              {sanitizing ? "Sanitizing EXIF..." : uploading ? `Uploading ${progress}%` : "Add Photo"}
+            </span>
+          </button>
           <input
+            ref={fileInputRef}
             type="file"
-            className="hidden"
-            onChange={handleUpload}
             accept="image/*"
-            disabled={uploading}
+            onChange={handleFileInput}
+            className="hidden"
           />
-          <div className="flex items-center justify-center gap-2 bg-brand-accent hover:bg-brand-accent-hover text-white px-6 py-3.5 rounded-[var(--radius-custom)] font-bold transition-all shadow-lg shadow-brand-accent/20">
-            {uploading ? (
-              <div className="flex items-center gap-3">
-                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                <span>Uploading {Math.round(progress)}%</span>
-              </div>
-            ) : (
-              <>
-                <Upload size={20} />
-                <span>Add Photo</span>
-              </>
-            )}
-          </div>
-        </label>
+        </div>
       </div>
 
-      {/* Error Alert Banner */}
+      {/* Error Alert */}
       {errorMsg && (
-        <div className="flex items-center justify-between gap-3 bg-red-500/10 border border-red-500/20 text-red-300 p-4 rounded-xl text-sm font-medium">
+        <div className="flex items-center justify-between bg-red-500/10 border border-red-500/20 text-red-300 p-4 rounded-2xl text-xs font-medium">
           <div className="flex items-center gap-2">
-            <AlertCircle size={18} className="text-red-400 shrink-0" />
+            <AlertCircle size={16} className="text-red-400 shrink-0" />
             <span>{errorMsg}</span>
           </div>
-          <button
-            onClick={() => setErrorMsg("")}
-            className="text-red-400 hover:text-white font-bold"
-          >
+          <button onClick={() => setErrorMsg("")} className="text-red-400 hover:text-white font-bold">
             ✕
           </button>
         </div>
       )}
 
-      {/* Gallery Grid */}
-      {loading ? (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
-          {[1, 2, 3, 4].map((i) => (
-            <div
-              key={i}
-              className="aspect-square glass-card rounded-2xl animate-pulse"
-            ></div>
-          ))}
+      {/* Drag & Drop Upload Zone */}
+      <div
+        onDragOver={(e) => {
+          e.preventDefault();
+          setIsDragOver(true);
+        }}
+        onDragLeave={() => setIsDragOver(false)}
+        onDrop={handleDrop}
+        onClick={() => fileInputRef.current?.click()}
+        className={`glass-card p-6 sm:p-8 rounded-3xl border-2 border-dashed transition-all cursor-pointer text-center space-y-3 ${
+          isDragOver
+            ? "border-emerald-400 bg-emerald-500/10"
+            : "border-white/10 hover:border-emerald-500/40 hover:bg-white/[0.02]"
+        }`}
+      >
+        <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 flex items-center justify-center text-emerald-400 mx-auto">
+          <ShieldCheck size={26} />
         </div>
-      ) : images.length > 0 ? (
-        <div className="columns-1 sm:columns-2 md:columns-3 lg:columns-4 gap-4 space-y-4">
-          <AnimatePresence>
-            {images.map((image) => (
+        <div>
+          <h3 className="text-base font-bold text-white mb-1">
+            Drag and drop private photos here
+          </h3>
+          <p className="text-xs text-text-dim max-w-md mx-auto">
+            All EXIF headers, GPS location coordinates, and camera serials are stripped instantly in browser memory before cloud transmission.
+          </p>
+        </div>
+      </div>
+
+      {/* Gallery Grid */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between pb-2 border-b border-white/10">
+          <h3 className="text-sm font-bold text-white flex items-center gap-2">
+            <ImageIcon size={16} className="text-emerald-400" />
+            <span>Sanitized Photos ({images.length})</span>
+          </h3>
+          <span className="text-xs font-mono text-emerald-400 flex items-center gap-1">
+            <ShieldCheck size={13} />
+            <span>100% Privacy Preserved</span>
+          </span>
+        </div>
+
+        {loading ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="aspect-square glass-card rounded-2xl animate-pulse" />
+            ))}
+          </div>
+        ) : images.length > 0 ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+            {images.map((photo, idx) => (
               <motion.div
-                key={image.id}
-                layout
-                initial={{ opacity: 0, scale: 0.9 }}
+                key={photo.id}
+                initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.9 }}
-                className="relative group rounded-[var(--radius-custom)] overflow-hidden break-inside-avoid shadow-xl ring-1 ring-white/10"
+                onClick={() => openLightbox(idx)}
+                className="group relative aspect-square rounded-2xl overflow-hidden glass-card border border-white/5 cursor-pointer"
               >
                 <img
-                  src={image.url}
-                  alt={image.fileName}
-                  className="w-full object-cover transition-transform duration-700 group-hover:scale-105"
+                  src={photo.url}
+                  alt={photo.caption || "Sanitized Memory"}
+                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                   loading="lazy"
                 />
-                <div className="absolute inset-0 bg-brand-primary/70 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-4">
+
+                {/* Dark Overlay with Caption & Actions */}
+                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity p-4 flex flex-col justify-between">
                   <div className="flex justify-end">
                     <button
-                      onClick={() => handleDelete(image)}
-                      className="p-2.5 bg-red-500/20 hover:bg-red-500 text-red-400 hover:text-white rounded-xl transition-all"
+                      onClick={(e) => handleDelete(photo, e)}
+                      className="p-2 bg-red-500/20 hover:bg-red-500/40 text-red-300 rounded-xl transition-colors backdrop-blur-sm"
+                      title="Delete Photo"
                     >
                       <Trash2 size={16} />
                     </button>
                   </div>
-                  <div className="space-y-1">
-                    <p className="text-[11px] text-white/80 font-mono truncate">
-                      {image.fileName}
+
+                  <div>
+                    <p className="text-white text-xs font-bold truncate mb-1">
+                      {photo.caption || "Sanitized Memory"}
                     </p>
-                    <p className="text-[10px] font-bold text-white/50">
-                      {image.createdAt?.toDate?.()
-                        ? image.createdAt.toDate().toLocaleDateString()
-                        : "Just now"}
-                    </p>
+                    <div className="flex items-center justify-between text-[10px] text-white/60 font-mono">
+                      <span>{photo.sanitizedSize ? formatBytes(photo.sanitizedSize) : "WebP"}</span>
+                      <span className="flex items-center gap-0.5 text-emerald-300">
+                        <ShieldCheck size={11} />
+                        <span>Clean</span>
+                      </span>
+                    </div>
                   </div>
                 </div>
               </motion.div>
             ))}
-          </AnimatePresence>
-        </div>
-      ) : (
-        <div className="glass-card rounded-[var(--radius-custom)] p-12 sm:p-20 flex flex-col items-center text-center">
-          <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-[var(--radius-custom)] bg-white/5 flex items-center justify-center text-text-dim mb-6">
-            <ImageIcon size={36} />
           </div>
-          <h3 className="text-xl sm:text-2xl font-bold text-white mb-2">
-            No images yet
-          </h3>
-          <p className="text-text-dim text-sm max-w-sm">
-            Click "Add Photo" above to upload your first private memory.
-          </p>
-        </div>
-      )}
+        ) : (
+          <div className="text-center py-16 text-text-dim space-y-3">
+            <ImageIcon size={40} className="mx-auto text-white/10" />
+            <p className="text-sm">No sanitized photos stored in your sanctuary yet.</p>
+          </div>
+        )}
+      </div>
+
+      {/* Lightbox Modal */}
+      <PhotoLightbox
+        photos={images}
+        currentIndex={selectedPhotoIndex || 0}
+        isOpen={isLightboxOpen}
+        onClose={() => setIsLightboxOpen(false)}
+        onNavigate={(newIdx) => setSelectedPhotoIndex(newIdx)}
+      />
     </div>
   );
 };
